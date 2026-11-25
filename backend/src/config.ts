@@ -10,34 +10,57 @@ export interface Config {
   port: number;
   githubToken: string | undefined;
   geminiApiKey: string | undefined;
-  databasePath: string | undefined;
+  databasePath: string;
 }
+
+const defaultDbPath = path.resolve(
+  __dirname,
+  '../../backend/data/repomind.db'
+);
 
 export const config: Config = {
   port: parseInt(process.env.PORT || '3001', 10),
   githubToken: process.env.GITHUB_TOKEN || undefined,
   geminiApiKey: process.env.GEMINI_API_KEY || undefined,
-  databasePath: process.env.DATABASE_PATH || undefined,
+  databasePath: process.env.DATABASE_PATH || defaultDbPath,
 };
 
 /**
+ * Constants governing GitHub GraphQL fetching limits, cache TTL, and retrieval.
+ */
+export const GITHUB_LIMITS = {
+  MAX_PRS: 20,
+  MAX_REVIEWS_PER_PR: 5,
+  MAX_COMMENTS_PER_PR: 5,
+  MAX_REVIEW_COMMENTS_PER_REVIEW: 5,
+  MAX_CLOSING_ISSUES_PER_PR: 5,
+  MAX_ISSUE_COMMENTS_PER_ISSUE: 5,
+  MAX_COMMITS_PER_PR: 5,
+} as const;
+
+export const RETRIEVAL_CONFIG = {
+  TOP_K: 5,
+  CHUNK_MAX_CHARS: 800,
+  CHUNK_OVERLAP_CHARS: 100,
+  EMBEDDING_MODEL: 'gemini-embedding-001',
+  CACHE_TTL_MS: 24 * 60 * 60 * 1000, // 24 hours
+} as const;
+
+/**
  * Validates configuration at startup.
- * In Session 1, missing GITHUB_TOKEN and GEMINI_API_KEY print warnings
- * because retrieval and Gemini answering are not implemented yet.
- *
- * NOTE: This will become a hard startup error once Phase 2 (GitHub GraphQL)
- * and Phase 4 (Gemini LLM) are implemented.
- * NEVER log the secret values themselves.
+ * Non-fatal warnings for missing tokens so /health and unit tests pass without tokens.
+ * Ingest and retrieve operations explicitly check for tokens when invoked.
+ * NEVER log secrets.
  */
 export function validateConfig(): void {
   if (!config.githubToken) {
     console.warn(
-      '[Config Warning] GITHUB_TOKEN is not set. (Acceptable for Session 1; required in Phase 2)'
+      '[Config Warning] GITHUB_TOKEN is not set. Ingesting from GitHub GraphQL will require this variable.'
     );
   }
   if (!config.geminiApiKey) {
     console.warn(
-      '[Config Warning] GEMINI_API_KEY is not set. (Acceptable for Session 1; required in Phase 4)'
+      '[Config Warning] GEMINI_API_KEY is not set. Generating embeddings will require this variable.'
     );
   }
 }
