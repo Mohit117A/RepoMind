@@ -113,10 +113,12 @@ export function normalizeRepositoryHistory(
   const isTruncated = hasNextPage || prNodes.length >= GITHUB_LIMITS.MAX_PRS;
 
   for (const pr of prNodes) {
+    const prState = (pr.state || (pr.mergedAt ? 'MERGED' : 'OPEN')).toUpperCase();
     const prId = `${repoKey}/pr-${pr.number}`;
     const prUrl = pr.url || `https://github.com/${owner}/${repo}/pull/${pr.number}`;
     const prTitle = `PR #${pr.number}: ${pr.title || 'Untitled PR'}`;
-    const prBody = pr.body?.trim() || '';
+    const rawBody = pr.body?.trim() || '';
+    const prBody = rawBody ? `State: ${prState}\n\n${rawBody}` : '';
     const prAuthor = pr.author?.login || null;
 
     if (!recordsMap.has(prId)) {

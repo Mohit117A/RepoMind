@@ -4,15 +4,15 @@ RepoMind is a page-aware Chrome extension and backend assistant for GitHub. When
 
 ---
 
-## Current Status (Session 2: GraphQL Ingest & SQLite Embedding Retrieval)
+## Current Status (Session 4: Evidence-Grounded Gemini Answers)
 
-- **Backend:** Express + TypeScript server with health check (`GET /health`), request validation via Zod, and `/api/ask` returning HTTP 501 `not_implemented` (honest placeholder pending Phase 4 answer generation).
+- **Backend:** Express + TypeScript server with health check (`GET /health`), request validation via Zod, and `/api/ask` delivering evidence-grounded AI answers with structured citations.
 - **GitHub GraphQL Ingestion (Phase 2):** Bounded history fetching for public repositories covering pull requests, linked issues, PR reviews, discussion comments, and associated commits with typed error mapping and truncation tracking.
 - **SQLite Cache & Embeddings (Phase 3):** Local cache using `better-sqlite3`, chunking with source metadata and verified URLs, vector embeddings via Google Gemini (`gemini-embedding-001`, 3072 dimensions), and cosine similarity retrieval with developer CLI verification tools (`npm run ingest`, `npm run retrieve`).
+- **Grounded Answer Generation (Phase 4):** Strictly evidence-based reasoning powered by `gemini-3.5-flash-lite` (configurable via `GEMINI_MODEL`, default: `gemini-3.5-flash-lite`). Includes prompt isolation against prompt injection, structured JSON output validation, URL rejection in answers, and automatic fallback to an honest insufficient-evidence response whenever history does not support the claim.
 - **Extension:** Chrome Manifest V3 side panel with dynamic repository detection from active GitHub tabs, clean status feedback, and response display scaffolding.
 - **Pending Implementation (Upcoming Sessions):**
-  - Phase 4: Gemini LLM evidence-grounded answering.
-  - Phase 6: End-to-end integration and demo readiness.
+  - Phase 6: End-to-end integration and demo polish with extension side panel.
 
 ---
 
@@ -117,8 +117,9 @@ The `.env` file contains:
 - `PORT`: Backend port (defaults to `3001` if unset).
 - `GITHUB_TOKEN`: GitHub Personal Access Token (classic with `public_repo` read access or fine-grained token with Public Repositories read access). Required for Phase 2 history ingestion.
   - *How to get:* Visit [GitHub Personal Access Tokens Settings](https://github.com/settings/tokens) -> Generate new token (classic) -> Select `public_repo` (read only).
-- `GEMINI_API_KEY`: Google Gemini API key from Google AI Studio. Required for Phase 3 vector embeddings.
+- `GEMINI_API_KEY`: Google Gemini API key from Google AI Studio. Required for vector embeddings and Phase 4 answering.
   - *How to get:* Visit [Google AI Studio](https://aistudio.google.com/) -> Get API Key.
+- `GEMINI_MODEL`: Model used for evidence-grounded answer generation (defaults to `gemini-3.5-flash-lite`, configurable).
 - `DATABASE_PATH`: File path for local SQLite cache (defaults to `backend/data/repomind.db`, which is gitignored).
 
 > **IMPORTANT:** Never commit `.env` or any secret keys to Git. `.gitignore` is strictly configured to exclude `.env` files and SQLite databases (`*.db`, `*.sqlite`, `backend/data/`).
@@ -244,6 +245,5 @@ cd extension && npm run test
 
 ## Known Limitations
 
-- **Phase 4 Pending:** `POST /api/ask` currently returns HTTP 501 `not_implemented` pending Phase 4 evidence-grounded Gemini answering.
 - **Public Repositories Only:** Private repositories and external Git hosts (GitLab/Bitbucket) are explicitly out of scope for this MVP.
 - **Bounded History:** The MVP indexes recent repository history (capped at 20 PRs and nested connections); it is not a full-repository semantic search engine.

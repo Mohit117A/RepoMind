@@ -2,6 +2,20 @@ import { RETRIEVAL_CONFIG } from '../config';
 import { NormalizedRecord, TextChunk } from '../types';
 
 /**
+ * Extracts pure body text from chunk text by stripping the metadata header.
+ */
+export function extractBodyText(chunkText: string): string {
+  const doubleNewline = chunkText.indexOf('\n\n');
+  if (doubleNewline !== -1) {
+    const candidateHeader = chunkText.slice(0, doubleNewline);
+    if (candidateHeader.startsWith('[') && candidateHeader.includes('URL:')) {
+      return chunkText.slice(doubleNewline + 2).trim();
+    }
+  }
+  return chunkText.trim();
+}
+
+/**
  * Splits text into chunks respecting word boundaries, with configurable maximum size and overlap.
  */
 export function splitTextIntoChunks(

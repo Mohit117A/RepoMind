@@ -10,6 +10,7 @@ export interface Config {
   port: number;
   githubToken: string | undefined;
   geminiApiKey: string | undefined;
+  geminiModel: string;
   databasePath: string;
 }
 
@@ -35,6 +36,7 @@ export const config: Config = {
   port: parseInt(process.env.PORT || '3001', 10),
   githubToken: process.env.GITHUB_TOKEN || undefined,
   geminiApiKey: process.env.GEMINI_API_KEY || undefined,
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   databasePath: resolveDatabasePath(process.env.DATABASE_PATH),
 };
 

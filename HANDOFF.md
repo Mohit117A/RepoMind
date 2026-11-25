@@ -264,4 +264,120 @@ npm run test
 
 ---
 
-### Next Task: Phase 4 (Gemini Grounded Answers) then wire /api/ask end to end, then Phase 6
+### Next Task: Phase 6 (End-to-End Demo Integration & Side Panel Connection)
+
+---
+
+## Session 4: Phase 4 — Evidence-Grounded Gemini Answers
+
+- **Date:** 2026-11-26
+- **Developers / Team:** Mohit & teammate
+- **Focus:** Phase 4 (Evidence-Grounded Gemini Answers per `implementation.md`), Wiring `POST /api/ask`, Concurrency Deduplication, Live Verification
+
+### What Was Done
+
+1. **Model Configuration:**
+   - Added `GEMINI_MODEL` to centralized configuration (`backend/src/config.ts`) and `.env.example`.
+   - Default model configured as `gemini-3.5-flash-lite` (selected after user approval and verified active on the user's API key; stays fully configurable via environment variable).
+   - API key sent via `x-goog-api-key` header; no temperature, top_p, or top_k parameters sent.
+   - For HTTP 503 from `generateContent`, automatically retries at most 2 times with a short delay before returning a clear `"AI model is busy, try again"` error (`AppError` 503).
+
+2. **Evidence Enhancement & PR State Normalization:**
+   - Enhanced PR record normalization (`backend/src/github/normalize.ts`) to store explicit PR states (`OPEN`, `CLOSED`, `MERGED`) directly in stored text, preventing unmerged PRs from being described as merged changes.
+   - Updated retrieval pipeline (`backend/src/retrieval/retriever.ts`):
+     - Gives Gemini the full chunk text (`fullText`), not truncated preview.
+     - Keeps only the best chunk per record (deduplication by `recordId`).
+     - Skips records with an empty body.
+     - Uses saved SQLite relationships (`record_relationships`) to expand top matches with linked issues, reviews, comments, and commits up to 12 total items.
+     - Excerpt presented to users (`extractBodyText`) strips metadata headers to display pure body text.
+
+3. **Gemini Answer Generation (`backend/src/llm/generator.ts`):**
+   - Enforced strict system instruction from `implementation.md` Phase 4, warning that evidence is untrusted data and forbidding prompt injection or outside inferences.
+   - Numbered evidence items provided to Gemini; Gemini responds with structured JSON: `{ answer: string, evidenceStatus: "supported" | "insufficient", citedIds: number[] }`.
+   - Validated LLM output using Zod (`GeminiOutputSchema`).
+   - Grounding guarantees:
+     - Built citations strictly from backend-supplied evidence; unknown IDs dropped.
+     - Rejects URLs written in the answer text (falls back to insufficient evidence).
+     - If `evidenceStatus === 'supported'` but citations are missing/empty, or if `evidenceStatus === 'insufficient'`, returns exact sentence:
+       `"The available repository history does not provide enough evidence to determine why this change was made."` and `sources: []`.
+     - When evidence is empty, returns the insufficient response immediately without invoking Gemini.
+     - Sanitized error reporting: API keys are never logged or leaked in error responses.
+
+4. **Endpoint Wiring (`POST /api/ask` in `backend/src/routes/ask.ts`):**
+   - Replaced old HTTP 501 with real pipeline: Ingestion (or SQLite cache hit) -> Retrieval -> Grounded generation -> Returns `AskResponse`.
+   - Added in-memory concurrency map (`pendingIngests`) to deduplicate simultaneous requests for the same repository so concurrent queries wait for the running ingest instead of spawning duplicates.
+
+---
+
+### What Was Tested & Actual Results
+
+1. **Unit & Integration Tests (Mocked API calls):**
+   - Commands: `npm test`
+   - Backend: **40 passed out of 40 tests** (all 6 test files passing: `app.test.ts`, `generator.test.ts`, `normalize.test.ts`, `client.test.ts`, `database.test.ts`, `retriever.test.ts`).
+   - Extension: **15 passed out of 15 tests**.
+   - Verified:
+     - Supported answer with valid citations.
+     - Insufficient evidence response with exact fallback sentence and empty sources.
+     - Dropping of unknown citation IDs.
+     - Rejection of URLs written in answers.
+     - Malformed JSON candidate handling (`malformed_output`).
+     - Gemini API error handling without key leakage.
+     - 503 retry logic (2 retries then "AI model is busy, try again").
+     - Immediate insufficient fallback when evidence is empty without calling Gemini.
+     - Concurrent request ingest deduplication on `POST /api/ask`.
+
+2. **TypeScript Compilation & Production Builds:**
+   - `npm run build:backend`: 0 errors, compiled cleanly.
+   - `npm run build:extension`: 0 errors, built extension assets into `extension/dist/`.
+
+3. **Live Verification Against Real Repository (`fastify/fastify`):**
+   - Cache refresh: `npm run ingest -- fastify fastify --refresh`
+     - Successfully ingested 74 records, 132 chunks, and 132 embeddings into SQLite cache.
+   - **Query A (Supported change):**
+     - Request: `"Why does Fastify now report a missing schema for null content entries?"`
+     - Status: HTTP 200 (Time: 2713ms)
+     - Answer: *"Previously, a null or undefined entry in a route schema content map caused startup to crash with a raw TypeError (Cannot read properties of null (reading 'schema')) instead of reporting an error code. Fastify now reports this as a missing schema by using optional chaining on the content-map dereferences, allowing the existing FST_ERR_SCH_CONTENT_MISSING_SCHEMA error path to handle null entries in the same way as empty entries."*
+     - Sources cited:
+       - `https://github.com/fastify/fastify/pull/7267`
+       - `https://github.com/fastify/fastify/issues/7246`
+       - `https://github.com/fastify/fastify/pull/7247`
+     - Check: Verified all cited URLs directly support the answer; PR state is accurately tagged (`State: OPEN`).
+   - **Query B (Insufficient evidence / counterfactual):**
+     - Request: `"Why did Fastify switch its rendering engine from React to Vue?"`
+     - Status: HTTP 200 (Time: 8371ms)
+     - Answer: *"The available repository history does not provide enough evidence to determine why this change was made."*
+     - EvidenceStatus: `"insufficient"`
+     - Sources: `[]`
+
+---
+
+### Known Issues & Quirks
+
+- `gemini-3.8-flash` experienced upstream Google API 503 spikes; `gemini-3.5-flash-lite` was selected and configured as the verified responsive default model.
+- Windows test runner: `npm test` runs smoothly with network access permitted for `supertest` local ephemeral socket bindings.
+
+---
+
+### Commands to Run the Project
+
+```bash
+# 1. Start the backend in watch mode
+npm run dev:backend
+
+# 2. Ingest repository history into local SQLite cache
+npm run ingest -- <owner> <repo> [--refresh]
+
+# 3. Retrieve top-K evidence for a question
+npm run retrieve -- <owner> <repo> "<question>"
+
+# 4. Build extension into extension/dist
+npm run build:extension
+
+# 5. Run all tests
+npm run test
+```
+
+---
+
+### Next Task: Phase 6 (End-to-End Demo Integration & Side Panel UI Connection)
+

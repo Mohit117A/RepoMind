@@ -174,6 +174,88 @@ export class RepositoryDatabase {
     }));
   }
 
+  public getRecordsByIds(ids: string[]): NormalizedRecord[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = this.db.prepare(
+      `SELECT id, repo_owner, repo_name, type, github_id, url, title, body, author, created_at, updated_at FROM records WHERE id IN (${placeholders})`
+    );
+    const rows = stmt.all(...ids) as Array<{
+      id: string;
+      repo_owner: string;
+      repo_name: string;
+      type: SourceType;
+      github_id: string;
+      url: string;
+      title: string;
+      body: string;
+      author: string | null;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      repoOwner: r.repo_owner,
+      repoName: r.repo_name,
+      type: r.type,
+      githubId: r.github_id,
+      url: r.url,
+      title: r.title,
+      body: r.body,
+      author: r.author,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  public getRelatedRecordIds(recordIds: string[]): string[] {
+    if (recordIds.length === 0) return [];
+    const placeholders = recordIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(`
+      SELECT child_record_id AS related_id FROM record_relationships WHERE parent_record_id IN (${placeholders})
+      UNION
+      SELECT parent_record_id AS related_id FROM record_relationships WHERE child_record_id IN (${placeholders})
+    `);
+    const rows = stmt.all(...recordIds, ...recordIds) as Array<{ related_id: string }>;
+    return rows.map((r) => r.related_id);
+  }
+
+  public getChunksForRecords(recordIds: string[]): TextChunk[] {
+    if (recordIds.length === 0) return [];
+    const placeholders = recordIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(`
+      SELECT id, record_id, repo_owner, repo_name, chunk_index, text, source_type, source_title, source_url, timestamp
+      FROM chunks
+      WHERE record_id IN (${placeholders})
+      ORDER BY record_id, chunk_index ASC
+    `);
+    const rows = stmt.all(...recordIds) as Array<{
+      id: string;
+      record_id: string;
+      repo_owner: string;
+      repo_name: string;
+      chunk_index: number;
+      text: string;
+      source_type: SourceType;
+      source_title: string;
+      source_url: string;
+      timestamp: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      recordId: r.record_id,
+      repoOwner: r.repo_owner,
+      repoName: r.repo_name,
+      chunkIndex: r.chunk_index,
+      text: r.text,
+      sourceType: r.source_type,
+      sourceTitle: r.source_title,
+      sourceUrl: r.source_url,
+      timestamp: r.timestamp,
+    }));
+  }
+
   public upsertChunks(chunks: TextChunk[]): void {
     if (chunks.length === 0) return;
     const stmt = this.db.prepare(`

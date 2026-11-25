@@ -6,8 +6,9 @@ import {
   IngestSummary,
   RetrievalResult,
   SourceType,
+  TextChunk,
 } from '../types';
-import { chunkRecords } from './chunker';
+import { chunkRecords, extractBodyText } from './chunker';
 import { geminiEmbedder, GeminiEmbedder } from './embedder';
 import { cosineSimilarity } from './similarity';
 
@@ -114,7 +115,8 @@ export class HistoryRetriever {
   }
 
   /**
-   * Retrieves top-K relevant evidence items for a given question using cosine similarity over embeddings.
+   * Retrieves top-K relevant evidence items for a given question using cosine similarity over embeddings,
+   * keeping only the best chunk per record, skipping empty-body records, and expanding with linked items.
    */
   async retrieveEvidence(
     owner: string,
@@ -123,6 +125,7 @@ export class HistoryRetriever {
     options: RetrieveOptions = {}
   ): Promise<RetrievalResult> {
     const topK = options.topK || RETRIEVAL_CONFIG.TOP_K;
+    const maxEvidenceCap = 12;
 
     const chunkEmbeddings = this.db.getChunksWithEmbeddings(owner, repo);
     if (chunkEmbeddings.length === 0) {
@@ -143,17 +146,35 @@ export class HistoryRetriever {
       return { chunk, score };
     });
 
+    // Filter out chunks with empty body
+    const nonEmptyChunks = scoredChunks.filter(({ chunk }) => {
+      const bodyText = extractBodyText(chunk.text);
+      return bodyText.length > 0;
+    });
+
     // Sort descending by score
-    scoredChunks.sort((a, b) => b.score - a.score);
+    nonEmptyChunks.sort((a, b) => b.score - a.score);
 
-    // Take top K
-    const topItems = scoredChunks.slice(0, topK);
+    // Keep only the best chunk per record
+    const seenRecordIds = new Set<string>();
+    const bestChunksByRecord: Array<{ chunk: TextChunk; score: number }> = [];
 
-    const evidence: EvidenceItem[] = topItems.map(({ chunk, score }) => {
-      // Excerpt clean preview (up to 300 characters)
-      const excerpt = chunk.text.length > 300
-        ? `${chunk.text.slice(0, 300).trim()}...`
-        : chunk.text;
+    for (const item of nonEmptyChunks) {
+      if (!seenRecordIds.has(item.chunk.recordId)) {
+        seenRecordIds.add(item.chunk.recordId);
+        bestChunksByRecord.push(item);
+      }
+    }
+
+    // Take top K primary matches
+    const primaryItems = bestChunksByRecord.slice(0, topK);
+
+    // Build primary evidence items
+    const evidence: EvidenceItem[] = primaryItems.map(({ chunk, score }) => {
+      const bodyText = extractBodyText(chunk.text);
+      const excerpt = bodyText.length > 300
+        ? `${bodyText.slice(0, 300).trim()}...`
+        : bodyText;
 
       return {
         chunkId: chunk.id,
@@ -164,8 +185,54 @@ export class HistoryRetriever {
         excerpt,
         similarity: parseFloat(score.toFixed(4)),
         timestamp: chunk.timestamp,
+        fullText: chunk.text,
       };
     });
+
+    // Expand with linked records from relationships if space remains (up to maxEvidenceCap)
+    if (evidence.length < maxEvidenceCap && primaryItems.length > 0) {
+      const primaryRecordIds = primaryItems.map((item) => item.chunk.recordId);
+      const relatedRecordIds = this.db.getRelatedRecordIds(primaryRecordIds);
+
+      // Filter out records already in evidence
+      const newRelatedIds = relatedRecordIds.filter((id) => !seenRecordIds.has(id));
+
+      if (newRelatedIds.length > 0) {
+        const relatedChunks = this.db.getChunksForRecords(newRelatedIds);
+        // Map chunks by recordId, taking only the first non-empty chunk per record
+        const relatedByRecord = new Map<string, TextChunk>();
+        for (const rChunk of relatedChunks) {
+          if (!relatedByRecord.has(rChunk.recordId)) {
+            const bodyText = extractBodyText(rChunk.text);
+            if (bodyText.length > 0) {
+              relatedByRecord.set(rChunk.recordId, rChunk);
+            }
+          }
+        }
+
+        for (const [rId, rChunk] of relatedByRecord.entries()) {
+          if (evidence.length >= maxEvidenceCap) break;
+          seenRecordIds.add(rId);
+
+          const bodyText = extractBodyText(rChunk.text);
+          const excerpt = bodyText.length > 300
+            ? `${bodyText.slice(0, 300).trim()}...`
+            : bodyText;
+
+          evidence.push({
+            chunkId: rChunk.id,
+            recordId: rChunk.recordId,
+            type: rChunk.sourceType,
+            title: rChunk.sourceTitle,
+            url: rChunk.sourceUrl,
+            excerpt,
+            similarity: 0.5,
+            timestamp: rChunk.timestamp,
+            fullText: rChunk.text,
+          });
+        }
+      }
+    }
 
     return {
       question,

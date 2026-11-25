@@ -110,6 +110,7 @@ export interface EvidenceItem {
   excerpt: string;
   similarity: number;
   timestamp: string;
+  fullText?: string;
 }
 
 export interface IngestSummary {
