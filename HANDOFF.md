@@ -440,4 +440,63 @@ npm run test
 
 ### Next Task: Demo Presentation & Final Polish
 
+---
+
+## Session 6: Polish Citations, Wording, and Documentation
+
+- **Date:** 2026-11-26
+- **Developers / Team:** Mohit & teammate
+- **Focus:** Citation completeness for named numbers, direct answer wording, merged PR demo question verification, comprehensive documentation update
+
+### What Was Done
+
+1. **Citation Completeness:**
+   - Updated answer generator (`backend/src/llm/generator.ts`) to scan the generated answer for any named PR or issue numbers (e.g. `#7256`, `PR #7247`).
+   - If a named number was supplied in evidence or linked PR relationships, it is automatically included in `sources` using only its verified, stored GitHub URL.
+   - Instructed Gemini to name only numbers that are cited in evidence. If a number cannot be matched to stored records, no link is invented.
+   - Added mocked unit test in `backend/src/llm/generator.test.ts` verifying that any PR or issue named in an answer is included in the source list.
+
+2. **Direct Answer Wording:**
+   - Instructed Gemini in `SYSTEM_INSTRUCTION` to speak directly and never begin with `"The user asks"`, `"The user assumes"`, or similar meta-commentary.
+   - Added backend cleanup in `generator.ts` stripping any opening `"The user assumes..."` phrasing.
+   - Added mocked unit test in `backend/src/llm/generator.test.ts`.
+
+3. **Demo Question Discovery & Live Verification (Merged PR):**
+   - Discovered merged PR in cached `fastify/fastify` repository data: **PR #7259** (`docs(ecosystem): remove deprecated @thecodepace/fastify-http-query`).
+   - Verified that the PR explicitly states why the change was made: `@thecodepace/fastify-http-query` was deprecated and removed because native HTTP `QUERY` method support (RFC 10008) was added directly into Fastify core in v5.11.0 (#6832).
+   - Executed live query through `POST /api/ask` on `http://localhost:3001`:
+     - Question: `"Why was @thecodepace/fastify-http-query removed from the ecosystem docs?"`
+     - Status: HTTP 200 (2113ms)
+     - Answer: *"@thecodepace/fastify-http-query was removed from the ecosystem documentation because the plugin became deprecated after native HTTP QUERY support (RFC 10008) was added to Fastify core."*
+     - Sources: `PR #7259` (MERGED). No unmerged disclaimer added because the change was merged.
+   - Verified null schema question and counterfactual React-to-Vue question.
+
+4. **Documentation Polish (`README.md`):**
+   - Updated status to MVP Complete & Verified.
+   - Documented `backend/src/llm/` directory in project structure.
+   - Fully detailed all known limitations: 20 newest PRs, 24-hour cache TTL, local backend execution, initial load latency, and public repositories only.
+   - Added complete table of all 13 `implementation.md` acceptance criteria with their exact test status, methods, and verification owners.
+
+---
+
+### Commands to Run the Project
+
+```bash
+# 1. Start the backend
+npm run dev:backend
+
+# 2. Ingest repository history into local SQLite cache
+npm run ingest -- <owner> <repo> [--refresh]
+
+# 3. Retrieve top-K evidence for a question
+npm run retrieve -- <owner> <repo> "<question>"
+
+# 4. Build extension into extension/dist
+npm run build:extension
+
+# 5. Run all tests
+npm run test
+```
+
+
 

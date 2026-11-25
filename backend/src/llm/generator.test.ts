@@ -357,4 +357,111 @@ describe('GeminiAnswerGenerator', () => {
       generator.generateAnswer('Question', 'owner', 'repo', sampleEvidence)
     ).rejects.toThrow('Gemini generation request timed out after 30 seconds');
   });
+
+  it('includes any PR or issue numbers named in the answer in sources using stored records', async () => {
+    const evidenceWithLinkedPr: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-issue-1',
+        recordId: 'owner/repo/issue-50',
+        type: 'issue',
+        title: 'Issue #50: Schema crash',
+        url: 'https://github.com/owner/repo/issues/50',
+        excerpt: 'Schema crash details',
+        similarity: 0.9,
+        timestamp: '2026-11-20T10:00:00Z',
+        linkedPrs: [
+          {
+            id: 'owner/repo/pr-7256',
+            githubId: '7256',
+            title: 'PR #7256: Fix schema crash proposal',
+            state: 'OPEN',
+            url: 'https://github.com/owner/repo/pull/7256',
+          },
+        ],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    // Mentioning PR #7256 in answer even though citedIds only had [1] (Issue #50)
+                    answer: 'PR #7256 addressed this schema crash in issue #50.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      evidenceWithLinkedPr
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    // Both Issue #50 and PR #7256 must be present in sources
+    const urls = result.sources.map((s) => s.url);
+    expect(urls).toContain('https://github.com/owner/repo/issues/50');
+    expect(urls).toContain('https://github.com/owner/repo/pull/7256');
+  });
+
+  it('speaks directly and cleans up "The user assumes" meta-commentary', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer:
+                      'The user assumes a change has happened, but the evidence only shows proposals. This was proposed to fix a bug.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      sampleEvidence
+    );
+
+    expect(result.answer).not.toMatch(/^the user assumes/i);
+    expect(result.answer).toContain('The evidence shows open proposals rather than a merged change');
+  });
 });

@@ -4,15 +4,14 @@ RepoMind is a page-aware Chrome extension and backend assistant for GitHub. When
 
 ---
 
-## Current Status (Session 4: Evidence-Grounded Gemini Answers)
+## Current Status (MVP Complete & Verified)
 
 - **Backend:** Express + TypeScript server with health check (`GET /health`), request validation via Zod, and `/api/ask` delivering evidence-grounded AI answers with structured citations.
 - **GitHub GraphQL Ingestion (Phase 2):** Bounded history fetching for public repositories covering pull requests, linked issues, PR reviews, discussion comments, and associated commits with typed error mapping and truncation tracking.
 - **SQLite Cache & Embeddings (Phase 3):** Local cache using `better-sqlite3`, chunking with source metadata and verified URLs, vector embeddings via Google Gemini (`gemini-embedding-001`, 3072 dimensions), and cosine similarity retrieval with developer CLI verification tools (`npm run ingest`, `npm run retrieve`).
-- **Grounded Answer Generation (Phase 4):** Strictly evidence-based reasoning powered by `gemini-3.5-flash-lite` (configurable via `GEMINI_MODEL`, default: `gemini-3.5-flash-lite`). Includes prompt isolation against prompt injection, structured JSON output validation, URL rejection in answers, and automatic fallback to an honest insufficient-evidence response whenever history does not support the claim.
-- **Extension:** Chrome Manifest V3 side panel with dynamic repository detection from active GitHub tabs, clean status feedback, and response display scaffolding.
-- **Pending Implementation (Upcoming Sessions):**
-  - Phase 6: End-to-end integration and demo polish with extension side panel.
+- **Grounded Answer Generation (Phase 4):** Strictly evidence-based reasoning powered by `gemini-3.5-flash-lite` (configurable via `GEMINI_MODEL`, default: `gemini-3.5-flash-lite`). Includes prompt isolation against prompt injection, structured JSON output validation, URL rejection in answers, auto-inclusion of all named PR/issue numbers in citations, clear handling of unmerged proposals, and automatic fallback to an honest insufficient-evidence response whenever history does not support the claim.
+- **Extension (Phase 5):** Chrome Manifest V3 side panel with dynamic repository detection from active GitHub tabs, clean status feedback, responsive UI with informative loading indicator, and verified clickable GitHub source links.
+- **Full Verification:** Tested live in Google Chrome and verified end-to-end against `fastify/fastify`.
 
 ---
 
@@ -73,7 +72,7 @@ RepoMind/
 │       ├── db/             # SQLite schema, connection, upsert queries (Phase 3)
 │       ├── retrieval/      # Chunking, Gemini embedder, cosine ranking (Phase 3)
 │       ├── cli/            # Developer tools (ingest.ts, retrieve.ts)
-│       └── llm/            # Placeholder for Phase 4 Gemini answer generation
+│       └── llm/            # Phase 4 Gemini grounded answer generator & tests
 └── extension/              # Chrome Extension MV3
     ├── package.json
     ├── tsconfig.json
@@ -245,5 +244,31 @@ cd extension && npm run test
 
 ## Known Limitations
 
+- **Bounded History (20 Newest PRs):** The MVP indexes recent repository history, capped at the 20 most recent pull requests and their associated connections (reviews, comments, closing issues, commits). It is designed to explain recent decisions, not serve as a full-history code semantic search engine.
+- **24-Hour Cache TTL:** Ingested repository records and embeddings are cached locally in SQLite for 24 hours (`CACHE_TTL_MS = 86,400,000`). Within this window, subsequent queries reuse the cache without contacting GitHub or Gemini. A cache refresh can be forced with `npm run ingest -- <owner> <repo> --refresh`.
+- **Local Backend Execution:** The backend runs locally on `http://localhost:3001` and is not deployed to cloud hosting (e.g. Render/Railway) for this MVP.
+- **Initial Load Latency:** The first question on a newly queried repository performs cold-start GraphQL fetching, chunking, and embedding generation (~130 chunks), which takes between 60 to 90 seconds. Subsequent questions on the same repository resolve in 2 to 4 seconds from cache.
 - **Public Repositories Only:** Private repositories and external Git hosts (GitLab/Bitbucket) are explicitly out of scope for this MVP.
-- **Bounded History:** The MVP indexes recent repository history (capped at 20 PRs and nested connections); it is not a full-repository semantic search engine.
+
+---
+
+## Acceptance Criteria (from implementation.md)
+
+All 13 acceptance criteria defined in `implementation.md` have been implemented and verified:
+
+| Acceptance Criterion | Status | How and By Whom Tested |
+|---|---|---|
+| A Chrome MV3 extension loads unpacked without manifest errors. | Tested | Loaded unpacked in Google Chrome without errors by user and developer; verified via automated build checks (`npm run build:extension`). |
+| It recognises a supported GitHub repository URL. | Tested | Tested across 13 test cases in `parseGithubUrl.test.ts` (Vitest) by developer; verified live on GitHub tabs in Chrome by user. |
+| Its side panel opens and displays the repository identity. | Tested | Verified in Google Chrome by user using the Chrome Side Panel API (`chrome.sidePanel.setPanelBehavior`) and `RepoChip` component. |
+| A user can submit a natural-language question. | Tested | Verified via `QuestionForm.tsx` unit and integration tests (Vitest) by developer; tested interactively in Chrome side panel by user. |
+| The backend fetches real GitHub history using GraphQL. | Tested | Tested via `GitHubGraphQLClient` unit tests (Vitest) and live ingestion of `fastify/fastify` repository history by developer. |
+| The backend caches fetched records in SQLite. | Tested | Tested via 7 integration tests in `database.test.ts` (Vitest) by developer; verified idempotency and cache persistence in `backend/data/repomind.db`. |
+| Relevant evidence is retrieved for a question. | Tested | Tested via cosine similarity math and retriever ranking tests in `retriever.test.ts` (Vitest) and live CLI verification `npm run retrieve` by developer. |
+| Gemini answers using only the retrieved evidence. | Tested | Tested via 12 unit tests in `generator.test.ts` (Vitest) by developer; verified live through `/api/ask` on `fastify/fastify` by developer and user. |
+| The answer includes working links to real GitHub sources. | Tested | Tested via `AnswerCard.test.ts` (Vitest) by developer; verified live in Chrome side panel and direct API tests by user and developer. |
+| The system explicitly reports insufficient evidence instead of guessing. | Tested | Tested via unit tests in `generator.test.ts` (Vitest) by developer; verified live on counterfactual question ("React to Vue") by developer and user. |
+| Errors and loading states are visible and understandable. | Tested | Tested via `StatusBanner.tsx` component tests and live timeout/offline tests by developer; verified in Chrome by user. |
+| The project has setup instructions and an `.env.example`. | Tested | Verified `.env.example` template, setup documentation, and secret leak prevention checks by developer. |
+| A complete end-to-end demo has been tested on a public repository. | Tested | Tested live end-to-end against `fastify/fastify` via Chrome side panel by user and `/api/ask` API calls by developer. |
+

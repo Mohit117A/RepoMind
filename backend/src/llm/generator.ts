@@ -14,7 +14,9 @@ Do not use outside knowledge to infer why a decision was made.
 Do not invent events, people, dates, links, issue numbers, or motivations.
 Distinguish explicit statements in the evidence from cautious interpretation.
 Attach source references to the claims they support.
-OPEN or CLOSED unmerged PRs and their commits are proposals, not changes that happened. If the question assumes a change happened but the evidence only shows a proposal, say so first.
+Speak directly. Never start your answer with "The user asks", "The user assumes", or similar meta-references to the user.
+OPEN or CLOSED unmerged PRs and their commits are proposals, not changes that happened. If the question assumes a change happened but the evidence only shows a proposal, state directly that the change is currently an unmerged proposal.
+Name only PR or issue numbers that you cite in citedIds. Do not mention any numbers that are not cited.
 If the evidence does not establish the reason, say:
 "The available repository history does not provide enough evidence to determine why this change was made."
 You may summarise evidence, but must not turn correlation into causation.
@@ -302,6 +304,66 @@ export class GeminiAnswerGenerator {
       }
     }
 
+    // Clean up any meta-commentary like "The user asks" or "The user assumes"
+    let directAnswer = answer.trim();
+    directAnswer = directAnswer
+      .replace(
+        /^the user assumes a change has happened, but the evidence only shows proposals/i,
+        'The evidence shows open proposals rather than a merged change'
+      )
+      .replace(/^the user assumes[^,.:;!?]*[,:;]\s*/i, '')
+      .replace(/^the user asks[^,.:;!?]*[,:;]\s*/i, '');
+    directAnswer = directAnswer.charAt(0).toUpperCase() + directAnswer.slice(1);
+
+    // Ensure every PR or issue number named in the answer appears in sources if present in stored evidence/linked PRs
+    const numberMatches = directAnswer.matchAll(
+      /(?:PR|pull request|issue)?\s*#(\d+)/gi
+    );
+    for (const match of numberMatches) {
+      const numStr = match[1];
+
+      // Check if already in validSources
+      const alreadyPresent = validSources.some(
+        (s) => s.url.endsWith(`/${numStr}`) || s.title.includes(`#${numStr}`)
+      );
+      if (alreadyPresent) continue;
+
+      // 1. Try to find matching evidence item
+      const evMatch = evidence.find(
+        (e) => e.url.endsWith(`/${numStr}`) || e.title.includes(`#${numStr}`)
+      );
+      if (evMatch && !seenUrls.has(evMatch.url)) {
+        seenUrls.add(evMatch.url);
+        validEvidenceItems.push(evMatch);
+        validSources.push({
+          type: evMatch.type,
+          title: evMatch.title,
+          url: evMatch.url,
+          excerpt: evMatch.excerpt,
+        });
+        continue;
+      }
+
+      // 2. Try to find matching linked PR from any evidence item's linkedPrs
+      for (const item of evidence) {
+        const linkedMatch = item.linkedPrs?.find(
+          (p) => String(p.githubId) === numStr || p.url.endsWith(`/${numStr}`)
+        );
+        if (linkedMatch && !seenUrls.has(linkedMatch.url)) {
+          seenUrls.add(linkedMatch.url);
+          validSources.push({
+            type: 'pull_request',
+            title: linkedMatch.title,
+            url: linkedMatch.url,
+            excerpt: '',
+          });
+          break;
+        }
+      }
+
+      // If a mentioned number cannot be matched to any stored record, do not invent a link
+    }
+
     // "supported" with no valid citation, or "insufficient":
     // return evidenceStatus "insufficient", exact sentence, and sources []
     if (evidenceStatus === 'insufficient' || validSources.length === 0) {
@@ -321,7 +383,7 @@ export class GeminiAnswerGenerator {
       return item.linkedPrs?.some((p) => p.state === 'MERGED');
     });
 
-    let finalAnswer = answer.trim();
+    let finalAnswer = directAnswer;
     if (!hasMergedPrCitation) {
       const unmergedNotice =
         'The cited evidence does not show that this change was merged.';
