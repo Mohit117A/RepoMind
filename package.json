@@ -1,0 +1,13 @@
+{
+  "name": "repomind",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Page-aware GitHub history assistant Chrome extension and backend",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:extension": "npm --prefix extension run build",
+    "dev:extension": "npm --prefix extension run dev",
+    "test": "npm --prefix backend test && npm --prefix extension test"
+  }
+}
