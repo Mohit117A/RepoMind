@@ -20,12 +20,9 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({ error, onRetry }) =>
         <div className="flex items-start space-x-2.5">
           <Info className="h-5 w-5 shrink-0 text-orange-dark mt-0.5" />
           <div className="flex-1">
-            <h4 className="text-[13px] font-semibold text-gray-900">Feature not available yet</h4>
+            <h4 className="text-[13px] font-semibold text-gray-900">Feature not available</h4>
             <p className="text-[13px] text-gray-700 mt-1">
-              {error.message}
-            </p>
-            <p className="text-[12px] text-gray-500 mt-1 italic">
-              (Session 1: Backend skeleton and side panel setup. Retrieval and AI answering arrive in upcoming sessions).
+              {error.message || 'This feature is currently unavailable.'}
             </p>
           </div>
         </div>

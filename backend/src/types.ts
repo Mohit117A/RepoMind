@@ -101,6 +101,14 @@ export interface ChunkEmbedding {
   dimensions: number;
 }
 
+export interface LinkedPrInfo {
+  id: string;
+  githubId: string;
+  title: string;
+  state: 'OPEN' | 'CLOSED' | 'MERGED' | 'UNKNOWN';
+  url: string;
+}
+
 export interface EvidenceItem {
   chunkId: string;
   recordId: string;
@@ -111,6 +119,7 @@ export interface EvidenceItem {
   similarity: number;
   timestamp: string;
   fullText?: string;
+  linkedPrs?: LinkedPrInfo[];
 }
 
 export interface IngestSummary {

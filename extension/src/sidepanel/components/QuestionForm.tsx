@@ -81,6 +81,15 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </>
         )}
       </button>
+
+      {loading && (
+        <div className="flex items-start space-x-2 rounded-lg bg-amber-50 border border-amber-200/80 p-2.5 text-[12px] text-amber-900">
+          <Loader2 className="h-4 w-4 animate-spin text-orange-dark shrink-0 mt-0.5" />
+          <span>
+            Searching repository history and generating answer... The first question on a repository can take a few minutes while history is ingested and indexed.
+          </span>
+        </div>
+      )}
     </form>
   );
 };

@@ -176,6 +176,8 @@ export class HistoryRetriever {
         ? `${bodyText.slice(0, 300).trim()}...`
         : bodyText;
 
+      const linkedPrs = this.db.getLinkedPrsForRecord(chunk.recordId);
+
       return {
         chunkId: chunk.id,
         recordId: chunk.recordId,
@@ -186,6 +188,7 @@ export class HistoryRetriever {
         similarity: parseFloat(score.toFixed(4)),
         timestamp: chunk.timestamp,
         fullText: chunk.text,
+        linkedPrs,
       };
     });
 
@@ -219,6 +222,8 @@ export class HistoryRetriever {
             ? `${bodyText.slice(0, 300).trim()}...`
             : bodyText;
 
+          const linkedPrs = this.db.getLinkedPrsForRecord(rChunk.recordId);
+
           evidence.push({
             chunkId: rChunk.id,
             recordId: rChunk.recordId,
@@ -229,6 +234,7 @@ export class HistoryRetriever {
             similarity: 0.5,
             timestamp: rChunk.timestamp,
             fullText: rChunk.text,
+            linkedPrs,
           });
         }
       }

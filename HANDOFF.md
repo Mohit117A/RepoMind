@@ -381,3 +381,63 @@ npm run test
 
 ### Next Task: Phase 6 (End-to-End Demo Integration & Side Panel UI Connection)
 
+---
+
+## Session 5: Handle Unmerged PRs, Add Timeouts, Update Extension
+
+- **Date:** 2026-11-26
+- **Developers / Team:** Mohit & teammate
+- **Focus:** Accuracy & unmerged proposals, Gemini generation & embedding timeouts, extension UX & timeout resilience
+
+### What Was Done
+
+1. **Accuracy & Unmerged Proposals:**
+   - In SQLite database queries (`backend/src/db/database.ts`), added `getLinkedPrsForRecord` traversing `record_relationships` to find linked PR states for every record type (commits, reviews, comments, issues, and PRs themselves).
+   - In retriever (`backend/src/retrieval/retriever.ts`), populated `linkedPrs` on all retrieved `EvidenceItem` objects.
+   - In generator (`backend/src/llm/generator.ts`):
+     - Updated `SYSTEM_INSTRUCTION` to strictly instruct: `"OPEN or CLOSED unmerged PRs and their commits are proposals, not changes that happened. If the question assumes a change happened but the evidence only shows a proposal, say so first."`
+     - Prefixed every evidence item passed to Gemini with explicit linked PR status tags (e.g. `PR Status: OPEN [UNMERGED PROPOSAL - NOT A MERGED CHANGE]`).
+     - Added backend guarantee: if a supported answer cites no MERGED PR, the backend automatically appends `"The cited evidence does not show that this change was merged."`
+
+2. **Timeouts on External APIs:**
+   - Added 30-second `AbortController` timeouts to both `GeminiAnswerGenerator.generateAnswer` (`backend/src/llm/generator.ts`) and `GeminiEmbedder.embedText` (`backend/src/retrieval/embedder.ts`) returning clean HTTP 504 `timeout` errors upon timeout.
+
+3. **Chrome Extension Improvements:**
+   - Raised client request timeout in `extension/src/sidepanel/api.ts` from 60 seconds to 180 seconds to comfortably accommodate cold-start ingestions on large repositories.
+   - Added loading feedback in `QuestionForm.tsx`: `"Searching repository history and generating answer... The first question on a repository can take a few minutes while history is ingested and indexed."`
+   - Removed outdated "Session 1" text from `StatusBanner.tsx`.
+   - Guaranteed `StatusBanner.tsx` always displays the backend's real error message rather than a blank panel.
+
+4. **Testing & Live Verification:**
+   - Added mocked unit tests for unmerged PR notice appending, generator timeouts, and embedder timeouts (44 backend tests, 15 extension tests, all passing).
+   - Live test with `fastify/fastify` on Question A correctly clarified that PRs #7247 and #7267 are unmerged proposals and appended the required note.
+   - Verified that both PR #7247 and PR #7267 are currently Open on GitHub.
+   - Question B correctly returned insufficient evidence.
+   - Left backend server running on `http://localhost:3001`.
+
+---
+
+### Commands to Run the Project
+
+```bash
+# 1. Start the backend
+npm run dev:backend
+
+# 2. Ingest repository history into local SQLite cache
+npm run ingest -- <owner> <repo> [--refresh]
+
+# 3. Retrieve top-K evidence for a question
+npm run retrieve -- <owner> <repo> "<question>"
+
+# 4. Build extension into extension/dist
+npm run build:extension
+
+# 5. Run all tests
+npm run test
+```
+
+---
+
+### Next Task: Demo Presentation & Final Polish
+
+

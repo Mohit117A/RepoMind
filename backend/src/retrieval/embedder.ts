@@ -51,6 +51,10 @@ export class GeminiEmbedder {
     const url = `${this.endpointBase}/models/${this.model}:embedContent?key=${this.apiKey}`;
     let response: Response;
 
+    const controller = new AbortController();
+    const timeoutMs = 30000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       response = await fetch(url, {
         method: 'POST',
@@ -62,14 +66,27 @@ export class GeminiEmbedder {
             parts: [{ text: cleanText }],
           },
         }),
+        signal: controller.signal,
       });
     } catch (err: unknown) {
+      if (
+        controller.signal.aborted ||
+        (err as { name?: string })?.name === 'AbortError'
+      ) {
+        throw new GeminiEmbeddingError(
+          504,
+          'timeout',
+          'Gemini embedding request timed out after 30 seconds. Please try again.'
+        );
+      }
       const message = err instanceof Error ? err.message : 'Network request failed';
       throw new GeminiEmbeddingError(
         503,
         'gemini_network_error',
         `Failed to reach Gemini API for embeddings: ${message}`
       );
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (response.status === 400 || response.status === 403) {

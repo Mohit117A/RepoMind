@@ -18,14 +18,14 @@ export class BackendError extends Error {
 
 /**
  * Sends a question regarding a specific repository to the RepoMind backend.
- * Uses a default 60-second timeout with cancel support.
+ * Uses a default 180-second timeout with cancel support.
  */
 export async function askQuestion(
   request: AskRequest,
   externalSignal?: AbortSignal
 ): Promise<AskResponse> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   // Link external abort signal if provided
   if (externalSignal) {
@@ -74,7 +74,7 @@ export async function askQuestion(
 
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new BackendError(
-        'Request timed out after 60 seconds.',
+        'Request timed out after 180 seconds.',
         'timeout'
       );
     }

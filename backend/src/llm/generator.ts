@@ -14,6 +14,7 @@ Do not use outside knowledge to infer why a decision was made.
 Do not invent events, people, dates, links, issue numbers, or motivations.
 Distinguish explicit statements in the evidence from cautious interpretation.
 Attach source references to the claims they support.
+OPEN or CLOSED unmerged PRs and their commits are proposals, not changes that happened. If the question assumes a change happened but the evidence only shows a proposal, say so first.
 If the evidence does not establish the reason, say:
 "The available repository history does not provide enough evidence to determine why this change was made."
 You may summarise evidence, but must not turn correlation into causation.
@@ -67,12 +68,35 @@ export class GeminiAnswerGenerator {
       );
     }
 
-    // Number evidence items and supply full chunk text
+    // Number evidence items and supply full chunk text with linked PR status
     const evidenceText = evidence
       .map((item, index) => {
         const itemNumber = index + 1;
         const textContent = item.fullText || item.excerpt;
-        return `[${itemNumber}] (${item.type.toUpperCase()}) ${item.title}\n${textContent}`;
+        let prStatusHeader = '';
+
+        if (item.type === 'pull_request') {
+          const prStateMatch = textContent.match(/State:\s*(OPEN|CLOSED|MERGED)/i);
+          const state = prStateMatch ? prStateMatch[1].toUpperCase() : 'UNKNOWN';
+          const proposalNotice =
+            state === 'MERGED'
+              ? 'MERGED CHANGE'
+              : `UNMERGED PROPOSAL (${state}) - NOT A MERGED CHANGE`;
+          prStatusHeader = `PR Status: ${state} [${proposalNotice}]`;
+        } else if (item.linkedPrs && item.linkedPrs.length > 0) {
+          const prDescriptions = item.linkedPrs.map((p) => {
+            const statusLabel =
+              p.state === 'MERGED'
+                ? 'MERGED CHANGE'
+                : `UNMERGED PROPOSAL (${p.state})`;
+            return `PR #${p.githubId} [${statusLabel}]`;
+          });
+          prStatusHeader = `Linked PRs: ${prDescriptions.join(', ')}`;
+        } else {
+          prStatusHeader = 'Linked PRs: None';
+        }
+
+        return `[${itemNumber}] (${item.type.toUpperCase()}) ${item.title}\n${prStatusHeader}\n${textContent}`;
       })
       .join('\n\n---\n\n');
 
@@ -117,6 +141,10 @@ export class GeminiAnswerGenerator {
     const maxRetries = 2; // For 503, retry at most 2 times with a short delay (3 total attempts)
 
     while (attempts <= maxRetries) {
+      const controller = new AbortController();
+      const timeoutMs = 30000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
       try {
         response = await this.fetchFn(url, {
           method: 'POST',
@@ -125,8 +153,19 @@ export class GeminiAnswerGenerator {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         });
       } catch (err: unknown) {
+        if (
+          controller.signal.aborted ||
+          (err as { name?: string })?.name === 'AbortError'
+        ) {
+          throw new AppError(
+            504,
+            'timeout',
+            'Gemini generation request timed out after 30 seconds. Please try again.'
+          );
+        }
         throw new AppError(
           500,
           'gemini_network_error',
@@ -134,6 +173,8 @@ export class GeminiAnswerGenerator {
             err instanceof Error ? err.message : 'Network error'
           }`
         );
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       if (response.status === 503) {
@@ -240,6 +281,7 @@ export class GeminiAnswerGenerator {
     }
 
     // Drop unknown IDs and build sources only from evidence supplied by backend
+    const validEvidenceItems: EvidenceItem[] = [];
     const validSources: SourceCitation[] = [];
     const seenUrls = new Set<string>();
 
@@ -249,6 +291,7 @@ export class GeminiAnswerGenerator {
         const item = evidence[index];
         if (!seenUrls.has(item.url)) {
           seenUrls.add(item.url);
+          validEvidenceItems.push(item);
           validSources.push({
             type: item.type,
             title: item.title,
@@ -269,8 +312,36 @@ export class GeminiAnswerGenerator {
       };
     }
 
+    // If a supported answer cites no MERGED PR, append a clear statement that evidence does not show it was merged
+    const hasMergedPrCitation = validEvidenceItems.some((item) => {
+      if (item.type === 'pull_request') {
+        const text = item.fullText || item.excerpt;
+        if (/State:\s*MERGED/i.test(text)) return true;
+      }
+      return item.linkedPrs?.some((p) => p.state === 'MERGED');
+    });
+
+    let finalAnswer = answer.trim();
+    if (!hasMergedPrCitation) {
+      const unmergedNotice =
+        'The cited evidence does not show that this change was merged.';
+      if (
+        !finalAnswer
+          .toLowerCase()
+          .includes('not show that this change was merged') &&
+        !finalAnswer
+          .toLowerCase()
+          .includes('does not show that this change was merged')
+      ) {
+        if (!/[.!?]$/.test(finalAnswer)) {
+          finalAnswer += '.';
+        }
+        finalAnswer += ` ${unmergedNotice}`;
+      }
+    }
+
     return {
-      answer,
+      answer: finalAnswer,
       evidenceStatus: 'supported',
       sources: validSources,
     };

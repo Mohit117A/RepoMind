@@ -256,6 +256,48 @@ export class RepositoryDatabase {
     }));
   }
 
+  public getLinkedPrsForRecord(
+    recordId: string
+  ): Array<{ id: string; githubId: string; title: string; state: 'OPEN' | 'CLOSED' | 'MERGED' | 'UNKNOWN'; url: string }> {
+    const stmt = this.db.prepare(`
+      SELECT r.id, r.github_id, r.title, r.body, r.url
+      FROM records r
+      WHERE r.type = 'pull_request'
+        AND (
+          r.id = ?
+          OR r.id IN (
+            SELECT parent_record_id FROM record_relationships WHERE child_record_id = ?
+          )
+          OR r.id IN (
+            SELECT parent_record_id FROM record_relationships WHERE child_record_id IN (
+              SELECT parent_record_id FROM record_relationships WHERE child_record_id = ?
+            )
+          )
+        )
+    `);
+    const rows = stmt.all(recordId, recordId, recordId) as Array<{
+      id: string;
+      github_id: string;
+      title: string;
+      body: string;
+      url: string;
+    }>;
+
+    return rows.map((r) => {
+      const match = r.body.match(/State:\s*(OPEN|CLOSED|MERGED)/i);
+      const state = match
+        ? (match[1].toUpperCase() as 'OPEN' | 'CLOSED' | 'MERGED')
+        : 'UNKNOWN';
+      return {
+        id: r.id,
+        githubId: r.github_id,
+        title: r.title,
+        state,
+        url: r.url,
+      };
+    });
+  }
+
   public upsertChunks(chunks: TextChunk[]): void {
     if (chunks.length === 0) return;
     const stmt = this.db.prepare(`

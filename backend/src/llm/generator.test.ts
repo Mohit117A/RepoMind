@@ -17,7 +17,16 @@ describe('GeminiAnswerGenerator', () => {
       similarity: 0.95,
       timestamp: '2026-11-20T10:00:00Z',
       fullText:
-        '[PULL_REQUEST] PR #1: Add auth tokens\nURL: https://github.com/owner/repo/pull/1\n\nImplemented bearer token verification.',
+        '[PULL_REQUEST] PR #1: Add auth tokens\nState: MERGED\nURL: https://github.com/owner/repo/pull/1\n\nImplemented bearer token verification.',
+      linkedPrs: [
+        {
+          id: 'owner/repo/pr-1',
+          githubId: '1',
+          title: 'PR #1: Add auth tokens',
+          state: 'MERGED',
+          url: 'https://github.com/owner/repo/pull/1',
+        },
+      ],
     },
     {
       chunkId: 'chunk-2',
@@ -30,6 +39,15 @@ describe('GeminiAnswerGenerator', () => {
       timestamp: '2026-11-19T10:00:00Z',
       fullText:
         '[ISSUE] Issue #2: Insecure session cookies\nURL: https://github.com/owner/repo/issues/2\n\nSession cookies were vulnerable to CSRF.',
+      linkedPrs: [
+        {
+          id: 'owner/repo/pr-1',
+          githubId: '1',
+          title: 'PR #1: Add auth tokens',
+          state: 'MERGED',
+          url: 'https://github.com/owner/repo/pull/1',
+        },
+      ],
     },
   ];
 
@@ -254,5 +272,89 @@ describe('GeminiAnswerGenerator', () => {
     expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
     expect(result.sources).toEqual([]);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('appends unmerged notice if a supported answer cites no MERGED PR', async () => {
+    const unmergedEvidence: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-open-1',
+        recordId: 'owner/repo/pr-10',
+        type: 'pull_request',
+        title: 'PR #10: Proposed new validation rule',
+        url: 'https://github.com/owner/repo/pull/10',
+        excerpt: 'Proposed stricter validation for schema.',
+        similarity: 0.92,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText:
+          '[PULL_REQUEST] PR #10: Proposed new validation rule\nState: OPEN\nURL: https://github.com/owner/repo/pull/10\n\nProposed stricter validation for schema.',
+        linkedPrs: [
+          {
+            id: 'owner/repo/pr-10',
+            githubId: '10',
+            title: 'PR #10: Proposed new validation rule',
+            state: 'OPEN',
+            url: 'https://github.com/owner/repo/pull/10',
+          },
+        ],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'A new validation rule was proposed to catch invalid schema inputs.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was the rule changed?',
+      'owner',
+      'repo',
+      unmergedEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    expect(result.answer).toContain('The cited evidence does not show that this change was merged.');
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0].url).toBe('https://github.com/owner/repo/pull/10');
+  });
+
+  it('throws 504 timeout error when request to Gemini times out', async () => {
+    const mockFetch = vi.fn().mockImplementation(() => {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      return Promise.reject(err);
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    await expect(
+      generator.generateAnswer('Question', 'owner', 'repo', sampleEvidence)
+    ).rejects.toThrow('Gemini generation request timed out after 30 seconds');
   });
 });
