@@ -64,7 +64,7 @@ describe('Retrieval and Chunking Pipeline', () => {
         fetchRepositoryHistory: vi.fn().mockResolvedValue({
           records: [
             {
-              id: 'pr-1',
+              id: 'owner/repo/pr-1',
               repoOwner: 'owner',
               repoName: 'repo',
               type: 'pull_request',
@@ -76,7 +76,7 @@ describe('Retrieval and Chunking Pipeline', () => {
               createdAt: '2026-11-20T10:00:00Z',
             },
             {
-              id: 'issue-2',
+              id: 'owner/repo/issue-2',
               repoOwner: 'owner',
               repoName: 'repo',
               type: 'issue',
@@ -90,8 +90,8 @@ describe('Retrieval and Chunking Pipeline', () => {
           ],
           relationships: [
             {
-              parentRecordId: 'pr-1',
-              childRecordId: 'issue-2',
+              parentRecordId: 'owner/repo/pr-1',
+              childRecordId: 'owner/repo/issue-2',
               relationshipType: 'pr_issue',
             },
           ],
@@ -154,6 +154,52 @@ describe('Retrieval and Chunking Pipeline', () => {
     it('honestly returns empty evidence when repository has no cached chunks', async () => {
       const result = await retriever.retrieveEvidence('nonexistent', 'repo', 'any question');
       expect(result.evidence).toEqual([]);
+    });
+
+    it('hits the same cache when requested with different letter case', async () => {
+      // Ingest with mixed case
+      await retriever.ingestRepository('Fastify', 'Fastify');
+      expect(mockClient.fetchRepositoryHistory).toHaveBeenCalledTimes(1);
+
+      // Subsequent ingest with lower case should hit the fresh cache without re-fetching
+      const summaryLower = await retriever.ingestRepository('fastify', 'fastify');
+      expect(summaryLower.cached).toBe(true);
+      expect(mockClient.fetchRepositoryHistory).toHaveBeenCalledTimes(1);
+
+      // Subsequent ingest with upper case should also hit the fresh cache
+      const summaryUpper = await retriever.ingestRepository('FASTIFY', 'FASTIFY');
+      expect(summaryUpper.cached).toBe(true);
+      expect(mockClient.fetchRepositoryHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps old data and does not mark repo fresh when embedding fails', async () => {
+      // 1. Initial successful ingest
+      const initialSummary = await retriever.ingestRepository('owner', 'repo');
+      expect(initialSummary.cached).toBe(false);
+      expect(db.isFresh('owner', 'repo', 60000)).toBe(true);
+      expect(db.getRecordCount('owner', 'repo')).toBe(2);
+      expect(db.getChunkCount('owner', 'repo')).toBe(2);
+      expect(db.getEmbeddingCount('owner', 'repo')).toBe(2);
+
+      const initialMeta = db.getRepository('owner', 'repo');
+      const initialFetchedAt = initialMeta?.lastFetchedAt;
+
+      // 2. Mock embedChunks to throw an error (e.g. rate limit / network error)
+      mockEmbedder.embedChunks = vi.fn().mockRejectedValue(new Error('Gemini embedding failed'));
+
+      // 3. Attempt forced refresh ingest, which should fail during embedding
+      await expect(
+        retriever.ingestRepository('owner', 'repo', { forceRefresh: true })
+      ).rejects.toThrow('Gemini embedding failed');
+
+      // 4. Verify that previous cache is completely intact!
+      expect(db.getRecordCount('owner', 'repo')).toBe(2);
+      expect(db.getChunkCount('owner', 'repo')).toBe(2);
+      expect(db.getEmbeddingCount('owner', 'repo')).toBe(2);
+
+      // And timestamp / metadata was NOT modified by the failed attempt
+      const afterMeta = db.getRepository('owner', 'repo');
+      expect(afterMeta?.lastFetchedAt).toBe(initialFetchedAt);
     });
   });
 });

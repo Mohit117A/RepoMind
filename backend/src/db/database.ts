@@ -45,7 +45,7 @@ export class RepositoryDatabase {
 
   public getRepository(owner: string, repo: string): RepositoryMetadata | null {
     const stmt = this.db.prepare(
-      'SELECT owner, repo, last_fetched_at, is_truncated, pr_count FROM repositories WHERE owner = ? AND repo = ?'
+      'SELECT owner, repo, last_fetched_at, is_truncated, pr_count FROM repositories WHERE LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)'
     );
     const row = stmt.get(owner, repo) as
       | {
@@ -143,7 +143,7 @@ export class RepositoryDatabase {
 
   public getRecords(owner: string, repo: string): NormalizedRecord[] {
     const stmt = this.db.prepare(
-      'SELECT id, repo_owner, repo_name, type, github_id, url, title, body, author, created_at, updated_at FROM records WHERE repo_owner = ? AND repo_name = ?'
+      'SELECT id, repo_owner, repo_name, type, github_id, url, title, body, author, created_at, updated_at FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
     );
     const rows = stmt.all(owner, repo) as Array<{
       id: string;
@@ -241,7 +241,7 @@ export class RepositoryDatabase {
         e.model_name, e.vector_json, e.dimensions
       FROM chunks c
       JOIN embeddings e ON c.id = e.chunk_id
-      WHERE c.repo_owner = ? AND c.repo_name = ?
+      WHERE LOWER(c.repo_owner) = LOWER(?) AND LOWER(c.repo_name) = LOWER(?)
     `);
 
     const rows = stmt.all(owner, repo) as Array<{
@@ -284,7 +284,7 @@ export class RepositoryDatabase {
 
   public getRecordCount(owner: string, repo: string): number {
     const stmt = this.db.prepare(
-      'SELECT COUNT(*) as count FROM records WHERE repo_owner = ? AND repo_name = ?'
+      'SELECT COUNT(*) as count FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
     );
     const result = stmt.get(owner, repo) as { count: number };
     return result.count;
@@ -292,7 +292,7 @@ export class RepositoryDatabase {
 
   public getChunkCount(owner: string, repo: string): number {
     const stmt = this.db.prepare(
-      'SELECT COUNT(*) as count FROM chunks WHERE repo_owner = ? AND repo_name = ?'
+      'SELECT COUNT(*) as count FROM chunks WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
     );
     const result = stmt.get(owner, repo) as { count: number };
     return result.count;
@@ -302,30 +302,206 @@ export class RepositoryDatabase {
     const stmt = this.db.prepare(`
       SELECT COUNT(*) as count FROM embeddings e
       JOIN chunks c ON e.chunk_id = c.id
-      WHERE c.repo_owner = ? AND c.repo_name = ?
+      WHERE LOWER(c.repo_owner) = LOWER(?) AND LOWER(c.repo_name) = LOWER(?)
     `);
     const result = stmt.get(owner, repo) as { count: number };
     return result.count;
   }
 
+  public getRelationships(owner: string, repo: string): NormalizedRelationship[] {
+    const prefix = `${owner.toLowerCase()}/${repo.toLowerCase()}/%`;
+    const stmt = this.db.prepare(`
+      SELECT parent_record_id, child_record_id, relationship_type
+      FROM record_relationships
+      WHERE parent_record_id LIKE ? 
+         OR child_record_id LIKE ?
+         OR parent_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+         OR child_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+    `);
+    const rows = stmt.all(prefix, prefix, owner, repo, owner, repo) as Array<{
+      parent_record_id: string;
+      child_record_id: string;
+      relationship_type: NormalizedRelationship['relationshipType'];
+    }>;
+
+    return rows.map((r) => ({
+      parentRecordId: r.parent_record_id,
+      childRecordId: r.child_record_id,
+      relationshipType: r.relationship_type,
+    }));
+  }
+
   public clearRepoData(owner: string, repo: string): void {
-    const deleteRecords = this.db.prepare(
-      'DELETE FROM records WHERE repo_owner = ? AND repo_name = ?'
-    );
+    const prefix = `${owner.toLowerCase()}/${repo.toLowerCase()}/%`;
+
+    const deleteRelationships = this.db.prepare(`
+      DELETE FROM record_relationships 
+      WHERE parent_record_id LIKE ? 
+         OR child_record_id LIKE ?
+         OR parent_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+         OR child_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+    `);
     const deleteChunks = this.db.prepare(
-      'DELETE FROM chunks WHERE repo_owner = ? AND repo_name = ?'
+      'DELETE FROM chunks WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
+    );
+    const deleteRecords = this.db.prepare(
+      'DELETE FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
     );
     const deleteRepo = this.db.prepare(
-      'DELETE FROM repositories WHERE owner = ? AND repo = ?'
+      'DELETE FROM repositories WHERE LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)'
     );
 
     const runCleanup = this.db.transaction(() => {
+      deleteRelationships.run(prefix, prefix, owner, repo, owner, repo);
       deleteChunks.run(owner, repo);
       deleteRecords.run(owner, repo);
       deleteRepo.run(owner, repo);
     });
 
     runCleanup();
+  }
+
+  /**
+   * Replaces all records, relationships, chunks, and embeddings for a repository,
+   * marking it fresh LAST, all inside a single atomic SQLite transaction.
+   * If any step fails before or during this transaction, previous cache remains intact.
+   */
+  public saveRepositoryData(
+    owner: string,
+    repo: string,
+    history: {
+      records: NormalizedRecord[];
+      relationships: NormalizedRelationship[];
+      isTruncated: boolean;
+      prCount: number;
+      fetchedAt: string;
+    },
+    chunks: TextChunk[],
+    embeddings: ChunkEmbedding[]
+  ): void {
+    const prefix = `${owner.toLowerCase()}/${repo.toLowerCase()}/%`;
+
+    const deleteRelationships = this.db.prepare(`
+      DELETE FROM record_relationships 
+      WHERE parent_record_id LIKE ? 
+         OR child_record_id LIKE ?
+         OR parent_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+         OR child_record_id IN (SELECT id FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?))
+    `);
+    const deleteChunks = this.db.prepare(
+      'DELETE FROM chunks WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
+    );
+    const deleteRecords = this.db.prepare(
+      'DELETE FROM records WHERE LOWER(repo_owner) = LOWER(?) AND LOWER(repo_name) = LOWER(?)'
+    );
+
+    const insertRecord = this.db.prepare(`
+      INSERT INTO records (id, repo_owner, repo_name, type, github_id, url, title, body, author, created_at, updated_at)
+      VALUES (@id, @repoOwner, @repoName, @type, @githubId, @url, @title, @body, @author, @createdAt, @updatedAt)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        body = excluded.body,
+        author = excluded.author,
+        updated_at = excluded.updated_at
+    `);
+
+    const insertRelationship = this.db.prepare(`
+      INSERT OR IGNORE INTO record_relationships (parent_record_id, child_record_id, relationship_type)
+      VALUES (?, ?, ?)
+    `);
+
+    const insertChunk = this.db.prepare(`
+      INSERT INTO chunks (id, record_id, repo_owner, repo_name, chunk_index, text, source_type, source_title, source_url, timestamp)
+      VALUES (@id, @recordId, @repoOwner, @repoName, @chunkIndex, @text, @sourceType, @sourceTitle, @sourceUrl, @timestamp)
+      ON CONFLICT(id) DO UPDATE SET
+        text = excluded.text,
+        source_title = excluded.source_title,
+        source_url = excluded.source_url
+    `);
+
+    const insertEmbedding = this.db.prepare(`
+      INSERT INTO embeddings (chunk_id, model_name, vector_json, dimensions)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(chunk_id) DO UPDATE SET
+        model_name = excluded.model_name,
+        vector_json = excluded.vector_json,
+        dimensions = excluded.dimensions
+    `);
+
+    const upsertRepo = this.db.prepare(`
+      INSERT INTO repositories (owner, repo, last_fetched_at, is_truncated, pr_count)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(owner, repo) DO UPDATE SET
+        last_fetched_at = excluded.last_fetched_at,
+        is_truncated = excluded.is_truncated,
+        pr_count = excluded.pr_count
+    `);
+
+    const saveTransaction = this.db.transaction(() => {
+      // 1. Delete previous data for this repository
+      deleteRelationships.run(prefix, prefix, owner, repo, owner, repo);
+      deleteChunks.run(owner, repo);
+      deleteRecords.run(owner, repo);
+
+      // 2. Insert records
+      for (const item of history.records) {
+        insertRecord.run({
+          id: item.id,
+          repoOwner: item.repoOwner,
+          repoName: item.repoName,
+          type: item.type,
+          githubId: item.githubId,
+          url: item.url,
+          title: item.title,
+          body: item.body,
+          author: item.author,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt || null,
+        });
+      }
+
+      // 3. Insert relationships
+      for (const rel of history.relationships) {
+        insertRelationship.run(rel.parentRecordId, rel.childRecordId, rel.relationshipType);
+      }
+
+      // 4. Insert chunks
+      for (const chk of chunks) {
+        insertChunk.run({
+          id: chk.id,
+          recordId: chk.recordId,
+          repoOwner: chk.repoOwner,
+          repoName: chk.repoName,
+          chunkIndex: chk.chunkIndex,
+          text: chk.text,
+          sourceType: chk.sourceType,
+          sourceTitle: chk.sourceTitle,
+          sourceUrl: chk.sourceUrl,
+          timestamp: chk.timestamp,
+        });
+      }
+
+      // 5. Insert embeddings
+      for (const emb of embeddings) {
+        insertEmbedding.run(
+          emb.chunkId,
+          emb.model,
+          JSON.stringify(emb.vector),
+          emb.dimensions
+        );
+      }
+
+      // 6. Mark fresh LAST
+      upsertRepo.run(
+        owner,
+        repo,
+        history.fetchedAt,
+        history.isTruncated ? 1 : 0,
+        history.prCount
+      );
+    });
+
+    saveTransaction();
   }
 
   public close(): void {

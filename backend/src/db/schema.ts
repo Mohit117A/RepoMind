@@ -1,7 +1,7 @@
 export const CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS repositories (
-  owner TEXT NOT NULL,
-  repo TEXT NOT NULL,
+  owner TEXT NOT NULL COLLATE NOCASE,
+  repo TEXT NOT NULL COLLATE NOCASE,
   last_fetched_at TEXT NOT NULL,
   is_truncated INTEGER NOT NULL DEFAULT 0,
   pr_count INTEGER NOT NULL DEFAULT 0,
@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS repositories (
 
 CREATE TABLE IF NOT EXISTS records (
   id TEXT NOT NULL,
-  repo_owner TEXT NOT NULL,
-  repo_name TEXT NOT NULL,
+  repo_owner TEXT NOT NULL COLLATE NOCASE,
+  repo_name TEXT NOT NULL COLLATE NOCASE,
   type TEXT NOT NULL,
   github_id TEXT NOT NULL,
   url TEXT NOT NULL,
@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS record_relationships (
 CREATE TABLE IF NOT EXISTS chunks (
   id TEXT NOT NULL,
   record_id TEXT NOT NULL,
-  repo_owner TEXT NOT NULL,
-  repo_name TEXT NOT NULL,
+  repo_owner TEXT NOT NULL COLLATE NOCASE,
+  repo_name TEXT NOT NULL COLLATE NOCASE,
   chunk_index INTEGER NOT NULL,
   text TEXT NOT NULL,
   source_type TEXT NOT NULL,
@@ -57,4 +57,6 @@ CREATE TABLE IF NOT EXISTS embeddings (
 
 CREATE INDEX IF NOT EXISTS idx_records_repo ON records(repo_owner, repo_name);
 CREATE INDEX IF NOT EXISTS idx_chunks_repo ON chunks(repo_owner, repo_name);
+CREATE INDEX IF NOT EXISTS idx_relationships_parent ON record_relationships(parent_record_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_child ON record_relationships(child_record_id);
 `;

@@ -18,11 +18,24 @@ const defaultDbPath = path.resolve(
   '../../backend/data/repomind.db'
 );
 
+function resolveDatabasePath(rawPath?: string): string {
+  if (!rawPath || rawPath === ':memory:') {
+    return rawPath || defaultDbPath;
+  }
+  if (path.isAbsolute(rawPath)) {
+    return rawPath;
+  }
+  const rootDir = process.cwd().endsWith('backend')
+    ? path.resolve(process.cwd(), '..')
+    : process.cwd();
+  return path.resolve(rootDir, rawPath);
+}
+
 export const config: Config = {
   port: parseInt(process.env.PORT || '3001', 10),
   githubToken: process.env.GITHUB_TOKEN || undefined,
   geminiApiKey: process.env.GEMINI_API_KEY || undefined,
-  databasePath: process.env.DATABASE_PATH || defaultDbPath,
+  databasePath: resolveDatabasePath(process.env.DATABASE_PATH),
 };
 
 /**

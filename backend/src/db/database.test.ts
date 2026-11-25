@@ -128,4 +128,137 @@ describe('RepositoryDatabase', () => {
     expect(db.getRecordCount('owner', 'repo')).toBe(0);
     expect(db.getRepository('owner', 'repo')).toBeNull();
   });
+
+  it('keeps two repositories with the same PR number separate without overwriting', () => {
+    const prA: NormalizedRecord = {
+      id: 'ownera/repoa/pr-1',
+      repoOwner: 'ownerA',
+      repoName: 'repoA',
+      type: 'pull_request',
+      githubId: '1',
+      url: 'https://github.com/ownerA/repoA/pull/1',
+      title: 'PR 1 in Repo A',
+      body: 'Body A',
+      author: 'alice',
+      createdAt: '2026-11-20T10:00:00Z',
+    };
+
+    const prB: NormalizedRecord = {
+      id: 'ownerb/repob/pr-1',
+      repoOwner: 'ownerB',
+      repoName: 'repoB',
+      type: 'pull_request',
+      githubId: '1',
+      url: 'https://github.com/ownerB/repoB/pull/1',
+      title: 'PR 1 in Repo B',
+      body: 'Body B',
+      author: 'bob',
+      createdAt: '2026-11-20T11:00:00Z',
+    };
+
+    db.upsertRecords([prA, prB]);
+
+    expect(db.getRecordCount('ownerA', 'repoA')).toBe(1);
+    expect(db.getRecordCount('ownerB', 'repoB')).toBe(1);
+
+    const recordsA = db.getRecords('ownerA', 'repoA');
+    const recordsB = db.getRecords('ownerB', 'repoB');
+
+    expect(recordsA[0].id).toBe('ownera/repoa/pr-1');
+    expect(recordsA[0].title).toBe('PR 1 in Repo A');
+
+    expect(recordsB[0].id).toBe('ownerb/repob/pr-1');
+    expect(recordsB[0].title).toBe('PR 1 in Repo B');
+  });
+
+  it('treats owner and repo case-insensitively for cache lookups without changing real URLs', () => {
+    const fetchedAt = new Date().toISOString();
+    db.upsertRepository('Fastify', 'Fastify', false, 1, fetchedAt);
+
+    const record: NormalizedRecord = {
+      id: 'fastify/fastify/pr-100',
+      repoOwner: 'Fastify',
+      repoName: 'Fastify',
+      type: 'pull_request',
+      githubId: '100',
+      url: 'https://github.com/Fastify/Fastify/pull/100',
+      title: 'PR 100',
+      body: 'Body content',
+      author: 'alice',
+      createdAt: fetchedAt,
+    };
+    db.upsertRecords([record]);
+
+    // Lookup with lowercase
+    expect(db.isFresh('fastify', 'fastify', 60000)).toBe(true);
+    const repoMeta = db.getRepository('fastify', 'fastify');
+    expect(repoMeta).not.toBeNull();
+    expect(repoMeta?.prCount).toBe(1);
+
+    const recordsLower = db.getRecords('fastify', 'fastify');
+    expect(recordsLower).toHaveLength(1);
+    expect(recordsLower[0].url).toBe('https://github.com/Fastify/Fastify/pull/100'); // URL unchanged
+
+    // Lookup with uppercase
+    expect(db.isFresh('FASTIFY', 'FASTIFY', 60000)).toBe(true);
+    expect(db.getRecordCount('FASTIFY', 'FASTIFY')).toBe(1);
+  });
+
+  it('clearRepoData removes that repository relationships without touching another repository', () => {
+    db.upsertRepository('ownerA', 'repoA', false, 1);
+    db.upsertRepository('ownerB', 'repoB', false, 1);
+
+    db.upsertRecords([
+      {
+        id: 'ownera/repoa/pr-1',
+        repoOwner: 'ownerA',
+        repoName: 'repoA',
+        type: 'pull_request',
+        githubId: '1',
+        url: 'https://github.com/ownerA/repoA/pull/1',
+        title: 'PR 1',
+        body: 'Body',
+        author: 'alice',
+        createdAt: '2026-11-20T10:00:00Z',
+      },
+      {
+        id: 'ownerb/repob/pr-1',
+        repoOwner: 'ownerB',
+        repoName: 'repoB',
+        type: 'pull_request',
+        githubId: '1',
+        url: 'https://github.com/ownerB/repoB/pull/1',
+        title: 'PR 1',
+        body: 'Body',
+        author: 'bob',
+        createdAt: '2026-11-20T10:00:00Z',
+      },
+    ]);
+
+    db.upsertRelationships([
+      {
+        parentRecordId: 'ownera/repoa/pr-1',
+        childRecordId: 'ownera/repoa/issue-1',
+        relationshipType: 'pr_issue',
+      },
+      {
+        parentRecordId: 'ownerb/repob/pr-1',
+        childRecordId: 'ownerb/repob/issue-1',
+        relationshipType: 'pr_issue',
+      },
+    ]);
+
+    expect(db.getRelationships('ownerA', 'repoA')).toHaveLength(1);
+    expect(db.getRelationships('ownerB', 'repoB')).toHaveLength(1);
+
+    // Clear only repoA
+    db.clearRepoData('ownerA', 'repoA');
+
+    expect(db.getRecordCount('ownerA', 'repoA')).toBe(0);
+    expect(db.getRelationships('ownerA', 'repoA')).toHaveLength(0);
+
+    // repoB remains intact
+    expect(db.getRecordCount('ownerB', 'repoB')).toBe(1);
+    expect(db.getRelationships('ownerB', 'repoB')).toHaveLength(1);
+  });
 });

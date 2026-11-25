@@ -103,6 +103,8 @@ export function normalizeRepositoryHistory(
   const recordsMap = new Map<string, NormalizedRecord>();
   const relationships: NormalizedRelationship[] = [];
 
+  const repoKey = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+
   const prNodes = (data.pullRequests?.nodes || []).filter(
     (n): n is RawPrNode => n !== null && typeof n === 'object' && typeof n.number === 'number'
   );
@@ -111,7 +113,7 @@ export function normalizeRepositoryHistory(
   const isTruncated = hasNextPage || prNodes.length >= GITHUB_LIMITS.MAX_PRS;
 
   for (const pr of prNodes) {
-    const prId = `pr-${pr.number}`;
+    const prId = `${repoKey}/pr-${pr.number}`;
     const prUrl = pr.url || `https://github.com/${owner}/${repo}/pull/${pr.number}`;
     const prTitle = `PR #${pr.number}: ${pr.title || 'Untitled PR'}`;
     const prBody = pr.body?.trim() || '';
@@ -139,7 +141,7 @@ export function normalizeRepositoryHistory(
     );
 
     for (const issue of issueNodes) {
-      const issueId = `issue-${issue.number}`;
+      const issueId = `${repoKey}/issue-${issue.number}`;
       const issueUrl = issue.url || `https://github.com/${owner}/${repo}/issues/${issue.number}`;
       const issueTitle = `Issue #${issue.number}: ${issue.title || 'Untitled Issue'}`;
       const issueBody = issue.body?.trim() || '';
@@ -173,7 +175,9 @@ export function normalizeRepositoryHistory(
       );
       for (const comment of issueComments) {
         if (!comment.body?.trim() && !comment.url) continue;
-        const commentId = comment.id ? `comment-${comment.id}` : `comment-issue-${issue.number}-${comment.createdAt}`;
+        const commentId = comment.id
+          ? `${repoKey}/comment-${comment.id}`
+          : `${repoKey}/comment-issue-${issue.number}-${comment.createdAt}`;
         const commentUrl = comment.url || issueUrl;
 
         if (!recordsMap.has(commentId)) {
@@ -205,7 +209,9 @@ export function normalizeRepositoryHistory(
     );
 
     for (const review of reviewNodes) {
-      const reviewId = review.id ? `review-${review.id}` : `review-pr-${pr.number}-${review.createdAt}`;
+      const reviewId = review.id
+        ? `${repoKey}/review-${review.id}`
+        : `${repoKey}/review-pr-${pr.number}-${review.createdAt}`;
       const reviewUrl = review.url || prUrl;
       const reviewState = review.state ? ` (${review.state})` : '';
 
@@ -236,7 +242,9 @@ export function normalizeRepositoryHistory(
       );
       for (const comment of reviewComments) {
         if (!comment.body?.trim() && !comment.url) continue;
-        const commentId = comment.id ? `comment-${comment.id}` : `review-comment-${reviewId}-${comment.createdAt}`;
+        const commentId = comment.id
+          ? `${repoKey}/comment-${comment.id}`
+          : `${repoKey}/review-comment-${review.id || pr.number}-${comment.createdAt}`;
         const commentUrl = comment.url || reviewUrl;
 
         if (!recordsMap.has(commentId)) {
@@ -268,7 +276,9 @@ export function normalizeRepositoryHistory(
     );
     for (const comment of prComments) {
       if (!comment.body?.trim() && !comment.url) continue;
-      const commentId = comment.id ? `comment-${comment.id}` : `pr-comment-${pr.number}-${comment.createdAt}`;
+      const commentId = comment.id
+        ? `${repoKey}/comment-${comment.id}`
+        : `${repoKey}/pr-comment-${pr.number}-${comment.createdAt}`;
       const commentUrl = comment.url || prUrl;
 
       if (!recordsMap.has(commentId)) {
@@ -300,7 +310,7 @@ export function normalizeRepositoryHistory(
     for (const commitNode of commitNodes) {
       const commit = commitNode.commit!;
       const shortOid = commit.oid.slice(0, 7);
-      const commitId = `commit-${commit.oid.slice(0, 12)}`;
+      const commitId = `${repoKey}/commit-${commit.oid.slice(0, 12)}`;
       const commitUrl = commit.url || `https://github.com/${owner}/${repo}/commit/${commit.oid}`;
       const firstLine = (commit.message || '').split('\n')[0].trim();
       const commitTitle = `Commit ${shortOid}: ${firstLine || 'No commit message'}`;

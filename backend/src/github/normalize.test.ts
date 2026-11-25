@@ -115,13 +115,13 @@ describe('normalizeRepositoryHistory', () => {
 
     // Verify relationships
     expect(result.relationships).toContainEqual({
-      parentRecordId: 'pr-100',
-      childRecordId: 'issue-50',
+      parentRecordId: 'fastify/fastify/pr-100',
+      childRecordId: 'fastify/fastify/issue-50',
       relationshipType: 'pr_issue',
     });
     expect(result.relationships).toContainEqual({
-      parentRecordId: 'pr-100',
-      childRecordId: 'commit-abcdef123456',
+      parentRecordId: 'fastify/fastify/pr-100',
+      childRecordId: 'fastify/fastify/commit-abcdef123456',
       relationshipType: 'pr_commit',
     });
   });

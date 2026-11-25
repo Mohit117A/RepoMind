@@ -72,29 +72,15 @@ export class HistoryRetriever {
       };
     }
 
-    if (options.forceRefresh) {
-      options.onProgress?.('Clearing stale cache...');
-      this.db.clearRepoData(owner, repo);
-    }
-
+    // Step 1: Fetch history from GitHub GraphQL (no database writes yet)
     options.onProgress?.('Fetching history from GitHub GraphQL...');
     const history = await this.client.fetchRepositoryHistory(owner, repo);
 
-    options.onProgress?.('Saving records to SQLite...');
-    this.db.upsertRepository(
-      owner,
-      repo,
-      history.isTruncated,
-      history.prCount,
-      history.fetchedAt
-    );
-    this.db.upsertRecords(history.records);
-    this.db.upsertRelationships(history.relationships);
-
+    // Step 2: Chunk records (in-memory)
     options.onProgress?.('Chunking records...');
     const chunks = chunkRecords(history.records);
-    this.db.upsertChunks(chunks);
 
+    // Step 3: Generate embeddings (API call, no database writes yet)
     options.onProgress?.(`Generating embeddings (${chunks.length} chunks)...`);
     const embeddings = await this.embedder.embedChunks(
       chunks,
@@ -103,8 +89,9 @@ export class HistoryRetriever {
       }
     );
 
-    options.onProgress?.('Saving embeddings to SQLite...');
-    this.db.upsertEmbeddings(embeddings);
+    // Step 4: After fetch, chunk, and embed all succeed, replace old data and save all data in one atomic transaction, marking fresh LAST
+    options.onProgress?.('Saving records and embeddings to SQLite cache...');
+    this.db.saveRepositoryData(owner, repo, history, chunks, embeddings);
 
     return {
       owner,
