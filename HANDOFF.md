@@ -137,3 +137,131 @@ When the next developer begins, follow `implementation.md`:
    - Select a SQLite library (e.g. `better-sqlite3` or `sqlite3`) and **verify that it installs and builds successfully on Windows and macOS** before relying on it (check native bindings).
    - Parameterized queries only; avoid duplicate records.
    - **Gemini Embedding Retrieval Warning:** The Gemini embedding model/API must be verified before use. If embeddings cannot be configured or verified, stop and ask the user before falling back to keyword search, as mandated in `implementation.md`.
+
+
+---
+
+## Session 2: GitHub GraphQL Integration + SQLite Cache & Retrieval Pipeline
+
+- **Date:** 2026-11-25
+- **Developers / Team:** Mohit & teammate
+- **Focus:** Phase 2 (GitHub GraphQL Integration), Phase 3 (SQLite Cache, Chunking, and Gemini Embedding Retrieval), Developer Verification Tools (`npm run ingest`, `npm run retrieve`)
+
+### What Was Done
+
+1. **Phase 2 — GitHub GraphQL Integration (`backend/src/github/`):**
+   - Verified GitHub GraphQL API fields against official schema and real public repositories (`fastify/fastify`).
+   - Implemented GraphQL query (`backend/src/github/queries.ts`) fetching PRs, author logins, states, timestamps, closing issues references (`closingIssuesReferences`), issue comments, reviews, inline review comments, top-level discussion comments, and associated commits (`commits` -> `oid`, `message`, `url`, `committedDate`).
+   - Built normalizer (`backend/src/github/normalize.ts`) mapping raw GraphQL nodes to structured domain types (`NormalizedRecord`, `NormalizedRelationship`), generating deterministic identifiers (`pr-123`, `issue-456`, `commit-abc1234`), preserving authentic GitHub URLs, safely handling null/empty connections, and tracking truncation (`isTruncated`).
+   - Implemented `GitHubGraphQLClient` (`backend/src/github/client.ts`) using Node native `fetch` with comprehensive typed error handling (missing token 401, bad token 401, rate limit 429 with reset time, repo not found / inaccessible 404, GraphQL `errors` array, network errors 503, timeout 504). `GITHUB_TOKEN` is read strictly from backend environment and never logged.
+
+2. **Phase 3 — SQLite Cache & Database Layer (`backend/src/db/`):**
+   - Selected and verified `better-sqlite3` (`v13.2.0`), proving successful installation and synchronous execution on Node `v24.22.0`.
+   - Designed normalized schema (`backend/src/db/schema.ts`):
+     - `repositories`: tracks repository identity, fetch timestamps, truncation flag, PR counts.
+     - `records`: unique records table with conflict resolution upserting existing IDs rather than duplicating.
+     - `record_relationships`: links PRs to issues, reviews, comments, and commits.
+     - `chunks`: text chunks with source type, title, verified URL, timestamp, and index.
+     - `embeddings`: chunk vector embeddings indexed by `chunk_id`.
+   - Implemented `RepositoryDatabase` (`backend/src/db/database.ts`) with idempotent schema initialization, safe directory creation, parameterized queries, WAL mode, foreign keys, and 24-hour freshness TTL (`isFresh`).
+
+3. **Phase 3 — Chunking, Gemini Embeddings, and Retrieval (`backend/src/retrieval/`):**
+   - Implemented chunker (`backend/src/retrieval/chunker.ts`) splitting records into overlapping chunks (`CHUNK_MAX_CHARS: 800`, `CHUNK_OVERLAP_CHARS: 100`) respecting word boundaries and prepending origin metadata and authentic URLs.
+   - Verified Google Gemini Embedding API: confirmed active model is `models/gemini-embedding-001` producing 3072-dimensional vector embeddings via REST endpoint.
+   - Implemented `GeminiEmbedder` (`backend/src/retrieval/embedder.ts`) with typed error handling for missing/invalid keys, rate limits, and network errors.
+   - Implemented `cosineSimilarity` (`backend/src/retrieval/similarity.ts`) computing cosine similarity across vector embeddings in backend code without external vector database dependencies.
+   - Built `HistoryRetriever` (`backend/src/retrieval/retriever.ts`) orchestrating repository ingestion, caching, and top-K evidence retrieval.
+
+4. **Developer Verification Tooling & CLI (`backend/src/cli/`):**
+   - Created `backend/src/cli/ingest.ts` (`npm run ingest -- <owner> <repo> [--refresh]`) to fetch, normalize, cache, chunk, embed, and print detailed counts.
+   - Created `backend/src/cli/retrieve.ts` (`npm run retrieve -- <owner> <repo> "<question>"`) to embed queries and output top-K evidence items with similarity scores, titles, URLs, and excerpts.
+   - Added root convenience scripts in `package.json` (`npm run ingest -- ...`, `npm run retrieve -- ...`).
+   - Maintained honest HTTP 501 `not_implemented` for `POST /api/ask` pending Phase 4.
+
+---
+
+### What Was Tested & Actual Results
+
+1. **Unit & Integration Tests (Vitest):**
+   - Command: `npm run test`
+   - Results: **40 passed out of 40 tests across both packages (100% passing)**.
+   - Backend: **25 passed out of 25 tests** (`backend/src/app.test.ts`, `backend/src/github/client.test.ts`, `backend/src/github/normalize.test.ts`, `backend/src/db/database.test.ts`, `backend/src/retrieval/retriever.test.ts`).
+     - Normalization of full PRs with linked issues, reviews, comments, and commits.
+     - Safe handling of null/empty connections and PRs without reviews or issues.
+     - Truncation flag behavior.
+     - GitHub client error mappings: 401 missing/invalid token, 429 rate limit, 404 repo not found, 503 network error.
+     - SQLite schema initialization, idempotency (duplicate fetches update instead of insert duplicates), and freshness TTL logic.
+     - Chunking preserving URL metadata and word boundary splitting.
+     - Cosine similarity vector mathematics.
+     - Retriever ingest cache reuse (subsequent ingest reuses SQLite without refetching).
+     - Top-K evidence ranking with mock embeddings.
+   - Extension: **15 passed out of 15 tests** (`AnswerCard.test.ts`, `parseGithubUrl.test.ts`).
+
+2. **TypeScript Compilation & Build Verification:**
+   - Backend TypeScript build: `cd backend && npm run build` -> 0 errors, compiled cleanly to `dist/`.
+   - Extension Vite production build: `npm run build:extension` -> compiled cleanly into `extension/dist/`.
+
+3. **Live Verification Against Real Public Repository (`fastify/fastify`):**
+   - Command: `npm run ingest -- fastify fastify`
+     - Successfully fetched recent history via GitHub GraphQL.
+     - Ingested 20 Pull Requests, 4 Linked Issues, 15 Reviews, 13 Comments, 22 Commits (74 Total Records).
+     - Chunked records into 132 text chunks.
+     - Successfully embedded all 132 chunks via Gemini API (`gemini-embedding-001`, 3072 dimensions) and cached in SQLite.
+   - Cache Reuse Verification:
+     - Ran `npm run ingest -- fastify fastify` a second time.
+     - Result: `Cache Status: Reused existing cache (Fresh)` in 0.8s, zero refetching, zero duplicate rows.
+   - Live Retrieval Verification (Relevant Question):
+     - Command: `npm run retrieve -- fastify fastify "Why was schema validation or null content handling changed?"`
+     - Result: Returned top 5 evidence items with high similarity (scores up to 0.7185) accurately matching PR #7267, Issue #7246, and related commits fixing the schema content null dereference bug, with verified GitHub URLs.
+   - Live Retrieval Verification (Unrelated Question):
+     - Command: `npm run retrieve -- fastify fastify "Why did we switch the rendering engine from React to Vue?"`
+     - Result: Similarity dropped significantly (scores 0.56-0.57 for unrelated ecosystem plugin cleanup), correctly reflecting low evidence.
+
+---
+
+### What Is NOT Done or Unverified
+
+- **Phase 4 (Gemini Evidence-Grounded Answering):** LLM prompt engineering, calling Gemini with retrieved evidence chunks, validating structured JSON responses, and end-to-end wiring to `POST /api/ask` are NOT yet implemented.
+- **Phase 6 (Demo Readiness):** End-to-end side panel demo connecting the extension UI to the backend response is scheduled after Phase 4.
+
+---
+
+### Known Issues & Quirks
+
+- `better-sqlite3` uses native bindings: verified functional on Linux x64 with prebuilt binaries. Standard prebuilt binaries are available for Windows and macOS.
+- Gemini API embedding model name: `models/gemini-embedding-001` is the current supported model for `embedContent` on v1beta API (`text-embedding-004` is deprecated/unavailable on v1beta for this API version).
+
+---
+
+### Commands to Run the Project
+
+```bash
+# 1. Start the backend in watch mode
+npm run dev:backend
+
+# 2. Ingest repository history into local SQLite cache
+npm run ingest -- <owner> <repo> [--refresh]
+
+# 3. Retrieve top-K evidence for a question
+npm run retrieve -- <owner> <repo> "<question>"
+
+# 4. Build extension into extension/dist
+npm run build:extension
+
+# 5. Run all tests
+npm run test
+```
+
+---
+
+### Environment Variables Needed So Far
+
+- `PORT` (optional, default: `3001`): Backend server listening port.
+- `DATABASE_PATH` (optional, default: `backend/data/repomind.db`): Local SQLite database file path.
+- `GITHUB_TOKEN` (required for `npm run ingest`): GitHub Personal Access Token with public repository read access.
+- `GEMINI_API_KEY` (required for embeddings and Phase 4): Google Gemini API key from Google AI Studio.
+- `VITE_BACKEND_URL` (optional, default: `http://localhost:3001`): Extension backend target.
+
+---
+
+### Next Task: Phase 4 (Gemini Grounded Answers) then wire /api/ask end to end, then Phase 6

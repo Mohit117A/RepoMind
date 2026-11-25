@@ -8,6 +8,8 @@
     "build:backend": "npm --prefix backend run build",
     "build:extension": "npm --prefix extension run build",
     "dev:extension": "npm --prefix extension run dev",
-    "test": "npm --prefix backend test && npm --prefix extension test"
+    "test": "npm --prefix backend test && npm --prefix extension test",
+    "ingest": "npm --prefix backend run ingest --",
+    "retrieve": "npm --prefix backend run retrieve --"
   }
 }
