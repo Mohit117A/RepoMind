@@ -1,6 +1,87 @@
 import { describe, it, expect } from 'vitest';
-import { RequestGuard, isSameRepo } from './requestGuard';
+import { RequestGuard, RepoAnswerCache, isSameRepo } from './requestGuard';
+import { resolveTabUrl } from './hooks/useActiveRepo';
 import { RepoIdentifier } from '../lib/parseGithubUrl';
+import { AskResponse } from '../types';
+
+describe('resolveTabUrl', () => {
+  it('prefers url when present', () => {
+    expect(resolveTabUrl({ url: 'https://github.com/fastify/fastify/pull/1', pendingUrl: 'https://github.com/fastify/fastify' })).toBe(
+      'https://github.com/fastify/fastify/pull/1'
+    );
+  });
+
+  it('falls back to pendingUrl when url is empty or undefined', () => {
+    expect(resolveTabUrl({ url: '', pendingUrl: 'https://github.com/fastify/fastify/pull/2' })).toBe(
+      'https://github.com/fastify/fastify/pull/2'
+    );
+    expect(resolveTabUrl({ pendingUrl: 'https://github.com/fastify/fastify/pull/2' })).toBe(
+      'https://github.com/fastify/fastify/pull/2'
+    );
+  });
+
+  it('returns null when neither url nor pendingUrl is present', () => {
+    expect(resolveTabUrl({})).toBeNull();
+    expect(resolveTabUrl(undefined)).toBeNull();
+  });
+});
+
+describe('RepoAnswerCache', () => {
+  const dummyAnswer: AskResponse = {
+    answer: 'Fastify ecosystem update.',
+    evidenceStatus: 'supported',
+    sources: [
+      {
+        type: 'pull_request',
+        title: 'PR #7259',
+        url: 'https://github.com/fastify/fastify/pull/7259',
+        excerpt: 'docs: remove deprecated plugin',
+      },
+    ],
+  };
+
+  it('stores and retrieves answer for repository case-insensitively', () => {
+    const cache = new RepoAnswerCache();
+    const repoA: RepoIdentifier = { owner: 'fastify', repo: 'fastify' };
+    const repoAUpper: RepoIdentifier = { owner: 'FASTIFY', repo: 'FASTIFY' };
+
+    cache.set(repoA, dummyAnswer);
+    expect(cache.get(repoAUpper)).toEqual(dummyAnswer);
+  });
+
+  it('hides answer when switching to other repo or non-github page, and restores when switching back', () => {
+    const cache = new RepoAnswerCache();
+    const repoA: RepoIdentifier = { owner: 'fastify', repo: 'fastify' };
+    const repoB: RepoIdentifier = { owner: 'facebook', repo: 'react' };
+
+    cache.set(repoA, dummyAnswer);
+
+    // Switching to repo B: repo B has no cached answer
+    expect(cache.get(repoB)).toBeNull();
+
+    // Switching to non-GitHub page: null has no cached answer
+    expect(cache.get(null)).toBeNull();
+
+    // Switching back to repo A: answer is shown again!
+    expect(cache.get(repoA)).toEqual(dummyAnswer);
+  });
+
+  it('new question replaces cached answer for repo', () => {
+    const cache = new RepoAnswerCache();
+    const repoA: RepoIdentifier = { owner: 'fastify', repo: 'fastify' };
+    const newAnswer: AskResponse = {
+      answer: 'New schema answer',
+      evidenceStatus: 'supported',
+      sources: [],
+    };
+
+    cache.set(repoA, dummyAnswer);
+    expect(cache.get(repoA)).toEqual(dummyAnswer);
+
+    cache.set(repoA, newAnswer);
+    expect(cache.get(repoA)).toEqual(newAnswer);
+  });
+});
 
 describe('isSameRepo', () => {
   it('returns true for same repo case-insensitively', () => {

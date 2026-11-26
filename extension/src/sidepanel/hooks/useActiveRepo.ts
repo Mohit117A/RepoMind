@@ -1,21 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { parseGithubUrl, RepoIdentifier } from '../../lib/parseGithubUrl';
 
+export interface TabLike {
+  url?: string;
+  pendingUrl?: string;
+  status?: string;
+}
+
+/**
+ * Resolves effective URL from tab, falling back to pendingUrl while loading.
+ */
+export function resolveTabUrl(tab?: TabLike): string | null {
+  if (!tab) return null;
+  return tab.url || tab.pendingUrl || null;
+}
+
 export function useActiveRepo() {
   const [repoInfo, setRepoInfo] = useState<RepoIdentifier | null>(null);
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   const updateFromTab = useCallback((tab?: chrome.tabs.Tab) => {
-    if (!tab || !tab.url) {
+    const effectiveUrl = resolveTabUrl(tab);
+
+    if (!effectiveUrl) {
+      // If a tab is loading and has no URL or pendingUrl yet, keep the previous repo
+      // to avoid transient flashes of "no repository" when clicking links or opening tabs
+      if (tab?.status === 'loading') {
+        return;
+      }
       setRepoInfo(null);
       setActiveUrl(null);
       setLoading(false);
       return;
     }
 
-    setActiveUrl(tab.url);
-    const parsed = parseGithubUrl(tab.url);
+    setActiveUrl(effectiveUrl);
+    const parsed = parseGithubUrl(effectiveUrl);
     setRepoInfo(parsed);
     setLoading(false);
   }, []);

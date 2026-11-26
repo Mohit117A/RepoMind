@@ -636,3 +636,31 @@ npm run test
      - Added unit tests in `extension/src/lib/parseGithubUrl.test.ts` verifying all new reserved routes return `null`.
      - 68 backend tests + 22 extension tests passed (90 total passed).
      - Verified building with a custom `VITE_BACKEND_URL=https://custom-repomind.example.com` baked into `sidepanel.js`, and cleanly restored default `http://localhost:3001`.
+---
+
+## Session 10: Extension Answer Retention When Opening Sources
+
+- **Date:** 2026-11-26
+- **Diagnosed Cause:**
+  1. In `extension/src/sidepanel/hooks/useActiveRepo.ts`, when a user clicked a source card (`<a target="_blank">`), Chrome opened a new tab which initially fired `onActivated` while `tab.url` was still an empty string `""`.
+  2. Previously, `!tab.url` immediately cleared the repository to `null` ("No GitHub repository detected"), and `App.tsx`'s `useEffect` unconditionally cleared `response` to `null` on any repo change.
+  3. Because the state was immediately destroyed rather than associated with the repository, returning to the original tab did not restore the answer.
+- **Fix:**
+  1. **Tab URL Resolution (`extension/src/sidepanel/hooks/useActiveRepo.ts`):**
+     - Added `resolveTabUrl(tab)` falling back to `tab.pendingUrl` when `tab.url` is empty.
+     - While `tab.status === 'loading'` and no URL is available yet, retains previous repository state instead of flashing `null`.
+     - Actual non-GitHub tabs with loaded non-GitHub URLs still cleanly evaluate to `null` and show "No GitHub repository detected".
+  2. **Repo-Scoped Answer Persistence (`extension/src/sidepanel/requestGuard.ts` & `App.tsx`):**
+     - Created `RepoAnswerCache` to retain completed answers associated with their repository (`owner/repo`).
+     - When switching between repositories or opening a non-GitHub page, answers from other repositories are hidden.
+     - When returning to a repository with a cached answer, that answer is cleanly shown again.
+     - Asking a new question on a repository replaces its cached answer.
+     - In-flight request cancellation and stale request ID guards from Batch 3 remain intact (switching repos still cancels pending queries; answers never leak across repositories).
+  3. **Automated Unit Tests:**
+     - Added tests in `extension/src/sidepanel/requestGuard.test.ts` verifying:
+       - `resolveTabUrl` with `url`, `pendingUrl`, and empty states.
+       - `RepoAnswerCache` case-insensitive storage, hiding on repo switch or non-GitHub navigation, and reappearing when returning to the repo.
+       - Replacement of cached answer when asking a new question.
+     - Total: 68 backend tests + 28 extension tests passed (96 total).
+- **Manual Verification Note:**
+  - Automated tests confirm the URL resolution and cache logic. Live multi-tab interaction in Chrome requires manual user verification (`chrome://extensions` reload).

@@ -1,8 +1,48 @@
 import { RepoIdentifier } from '../lib/parseGithubUrl';
+import { AskResponse } from '../types';
 
 export interface GuardedState {
   currentRepo: RepoIdentifier | null;
   activeRequestId: number;
+}
+
+/**
+ * Normalizes repository identifier to lowercase owner/repo key.
+ */
+export function getRepoKey(repo: RepoIdentifier | null | undefined): string | null {
+  if (!repo) return null;
+  return `${repo.owner.toLowerCase()}/${repo.repo.toLowerCase()}`;
+}
+
+/**
+ * Stores completed answers scoped by repository.
+ * Keeps an answer associated with the repository it belongs to.
+ * When switching back to a repo, its answer can be restored.
+ * A new question for the repo replaces the cached answer.
+ */
+export class RepoAnswerCache {
+  private answers = new Map<string, AskResponse>();
+
+  public get(repo: RepoIdentifier | null | undefined): AskResponse | null {
+    const key = getRepoKey(repo);
+    if (!key) return null;
+    return this.answers.get(key) || null;
+  }
+
+  public set(repo: RepoIdentifier | null | undefined, response: AskResponse): void {
+    const key = getRepoKey(repo);
+    if (!key) return;
+    this.answers.set(key, response);
+  }
+
+  public clear(repo?: RepoIdentifier | null | undefined): void {
+    if (repo) {
+      const key = getRepoKey(repo);
+      if (key) this.answers.delete(key);
+    } else {
+      this.answers.clear();
+    }
+  }
 }
 
 /**

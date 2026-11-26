@@ -7,7 +7,7 @@ import { AnswerCard } from './components/AnswerCard';
 import { useActiveRepo } from './hooks/useActiveRepo';
 import { askQuestion, BackendError } from './api';
 import { AskResponse } from '../types';
-import { RequestGuard } from './requestGuard';
+import { RequestGuard, RepoAnswerCache } from './requestGuard';
 
 export const App: React.FC = () => {
   const { repoInfo, refreshActiveTab } = useActiveRepo();
@@ -17,15 +17,20 @@ export const App: React.FC = () => {
   const [lastQuestion, setLastQuestion] = useState<string>('');
 
   const guardRef = useRef<RequestGuard>(new RequestGuard());
+  const answerCacheRef = useRef<RepoAnswerCache>(new RepoAnswerCache());
 
-  // Clear answer and errors if the active repository changes (case-insensitively).
-  // Aborts stale requests and ensures no late response updates state.
+  // Handle repository change:
+  // - If the repository changed, abort in-flight requests and clear errors/loading.
+  // - Do not permanently delete completed answers; restore cached answer for repoInfo if present.
+  // - If repo is null or a different repo without a cached answer, response is null.
   useEffect(() => {
     const changed = guardRef.current.onRepoChange(repoInfo);
     if (changed) {
-      setResponse(null);
       setError(null);
       setLoading(false);
+      // Retrieve answer scoped to the new current repository
+      const cached = answerCacheRef.current.get(repoInfo);
+      setResponse(cached);
     }
   }, [repoInfo]);
 
@@ -62,6 +67,8 @@ export const App: React.FC = () => {
         return;
       }
 
+      // Save answer in cache scoped to this repository
+      answerCacheRef.current.set(repoInfo, result);
       setResponse(result);
     } catch (err: unknown) {
       // If stale or aborted due to repo change, do not change error or loading state
