@@ -515,3 +515,13 @@ npm run test
     - Insufficient-evidence response: Verified in Chrome by user.
     - Merged demo question: Tested via `/api/ask` API by developer; not tested in Chrome by user.
     - Error and loading states: Marked **Not tested** in acceptance table because `StatusBanner.tsx` has no automated tests and error states (such as backend offline message) were not verified in Chrome.
+
+---
+
+## Manual Chrome Verification Update
+
+- **Date:** 2026-11-26
+- **Verified by User in Chrome:**
+  - Merged PR demo question regarding `@thecodepace/fastify-http-query` executed in Chrome side panel, with PR #7259 showing as Merged.
+  - "Backend offline" message verified in Chrome side panel after stopping the local backend server.
+  - Acceptance table in `README.md` updated accordingly (noting manual checks and explicitly stating that no automated component tests exist for `StatusBanner.tsx`).
