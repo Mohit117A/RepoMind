@@ -609,3 +609,30 @@ npm run test
        - Every run returned `supported` with 0 errors.
        - Every marker outside backtick code was separated (`[1][2][4]`) and matched its exact source count.
        - "Why did Fastify switch its rendering engine from React to Vue?" remained `insufficient`.
+---
+
+## Session 9: Hardening Batch 3 - Extension Stale Answer Guard and Repository Detection
+
+- **Date:** 2026-11-26
+- **What Was Done:**
+  1. **Stale Request & Repository Switch Guard (`extension/src/sidepanel/requestGuard.ts` & `App.tsx`):**
+     - Implemented `RequestGuard` and `isSameRepo` helper.
+     - When switching between pages of the same repository (e.g. PR -> issue -> code), comparison is case-insensitive and the active request is NOT aborted.
+     - When switching repositories (e.g. repo A -> repo B):
+       - Aborts the in-flight fetch request using `AbortController.abort()`.
+       - Increments/resets the active `requestId`.
+       - Late responses or late errors from older requests are strictly discarded and cannot modify `response`, `error`, or `loading` states.
+       - Switching A -> B -> A safely ignores any delayed response from the first request on A.
+  2. **Reserved GitHub Route Rejection (`extension/src/lib/parseGithubUrl.ts`):**
+     - Expanded `RESERVED_FIRST_SEGMENTS` to reject top-level non-repository GitHub URLs: `/trending`, `/collections`, `/apps`, `/users`, `/about`, `/account`, `/admin`, `/api`, `/contact`, `/dashboard`, `/developer`, `/developers`, `/help`, `/logout`, `/pricing`, `/security`, `/team`, `/trends`.
+     - Verified so real repository owner handles (e.g. `facebook/react`, `fastify/fastify`) are not blocked.
+  3. **Manifest Permissions Assessment (`extension/public/manifest.json`):**
+     - Verified Chrome documentation: `"tabs"` permission is strictly required for the extension side panel to read `tab.url` when the user switches to non-whitelisted tabs (such as navigating to `google.com` or switching between tabs). Without `"tabs"`, `tab.url` is `undefined` on non-GitHub tabs, which breaks the panel's ability to clear repository status and detect when a user moves off GitHub. Retained `"tabs"` and `"sidePanel"` permissions alongside `"host_permissions"`.
+  4. **Backend URL Configuration Documentation (`README.md` & `extension/.env.example`):**
+     - Added `extension/.env.example` showing `VITE_BACKEND_URL=http://localhost:3001` with instructions.
+     - Documented in `README.md`: which `.env` file Vite reads (`extension/.env`), the `host_permissions` manifest requirement if pointing to a remote backend, and the required rebuild step (`npm run build:extension`).
+  5. **Verification & Testing:**
+     - Added 7 unit tests in `extension/src/sidepanel/requestGuard.test.ts` testing same-repo retention, late success/error discard, and A -> B -> A stale request rejection.
+     - Added unit tests in `extension/src/lib/parseGithubUrl.test.ts` verifying all new reserved routes return `null`.
+     - 68 backend tests + 22 extension tests passed (90 total passed).
+     - Verified building with a custom `VITE_BACKEND_URL=https://custom-repomind.example.com` baked into `sidepanel.js`, and cleanly restored default `http://localhost:3001`.

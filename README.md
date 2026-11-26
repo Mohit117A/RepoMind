@@ -125,6 +125,29 @@ The `.env` file contains:
 - `GEMINI_MODEL`: Model used for evidence-grounded answer generation (defaults to `gemini-3.5-flash-lite`, configurable).
 - `DATABASE_PATH`: File path for local SQLite cache (defaults to `backend/data/repomind.db`, which is gitignored).
 
+#### Extension Backend URL Configuration (`VITE_BACKEND_URL`)
+
+The Chrome extension communicates with the backend via Vite environment variables:
+- **Which file Vite reads:** Vite loads environment variables prefixed with `VITE_` from `.env` files located inside the `extension/` directory (e.g. `extension/.env`, with template at `extension/.env.example`).
+- **Default value:** Defaults to `http://localhost:3001` if unset.
+- **How to configure a custom backend URL:**
+  1. Create `extension/.env` (or copy from `extension/.env.example`):
+     ```bash
+     VITE_BACKEND_URL=https://api.repomind.example.com
+     ```
+  2. If using a remote/custom backend origin, update `host_permissions` in `extension/public/manifest.json` so Chrome permits network calls:
+     ```json
+     "host_permissions": [
+       "https://github.com/*",
+       "https://api.repomind.example.com/*"
+     ]
+     ```
+  3. **Rebuild Step:** Because Vite bakes `import.meta.env` values into static client bundles at build time, you must rebuild the extension and reload it in Chrome:
+     ```bash
+     npm run build:extension
+     ```
+     Then click the Reload button on the extension card in `chrome://extensions`.
+
 > **IMPORTANT:** Never commit `.env` or any secret keys to Git. `.gitignore` is strictly configured to exclude `.env` files and SQLite databases (`*.db`, `*.sqlite`, `backend/data/`).
 
 ---

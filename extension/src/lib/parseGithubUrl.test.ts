@@ -88,6 +88,13 @@ describe('parseGithubUrl', () => {
     expect(parseGithubUrl('https://github.com/pulls')).toBeNull();
     expect(parseGithubUrl('https://github.com/issues')).toBeNull();
     expect(parseGithubUrl('https://github.com/features')).toBeNull();
+    expect(parseGithubUrl('https://github.com/trending/developers')).toBeNull();
+    expect(parseGithubUrl('https://github.com/collections/clean-code-linters')).toBeNull();
+    expect(parseGithubUrl('https://github.com/apps/desktop')).toBeNull();
+    expect(parseGithubUrl('https://github.com/users/octocat')).toBeNull();
+    expect(parseGithubUrl('https://github.com/about/careers')).toBeNull();
+    expect(parseGithubUrl('https://github.com/pricing')).toBeNull();
+    expect(parseGithubUrl('https://github.com/security')).toBeNull();
   });
 
   it('rejects non-GitHub domains', () => {

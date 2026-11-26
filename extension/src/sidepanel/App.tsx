@@ -7,6 +7,7 @@ import { AnswerCard } from './components/AnswerCard';
 import { useActiveRepo } from './hooks/useActiveRepo';
 import { askQuestion, BackendError } from './api';
 import { AskResponse } from '../types';
+import { RequestGuard } from './requestGuard';
 
 export const App: React.FC = () => {
   const { repoInfo, refreshActiveTab } = useActiveRepo();
@@ -15,21 +16,31 @@ export const App: React.FC = () => {
   const [response, setResponse] = useState<AskResponse | null>(null);
   const [lastQuestion, setLastQuestion] = useState<string>('');
 
-  const previousRepoKey = useRef<string | null>(null);
-  const currentRepoKey = repoInfo ? `${repoInfo.owner}/${repoInfo.repo}` : null;
+  const guardRef = useRef<RequestGuard>(new RequestGuard());
 
-  // Clear answer and errors if the active repository changes
+  // Clear answer and errors if the active repository changes (case-insensitively).
+  // Aborts stale requests and ensures no late response updates state.
   useEffect(() => {
-    if (previousRepoKey.current !== currentRepoKey) {
-      previousRepoKey.current = currentRepoKey;
+    const changed = guardRef.current.onRepoChange(repoInfo);
+    if (changed) {
       setResponse(null);
       setError(null);
       setLoading(false);
     }
-  }, [currentRepoKey]);
+  }, [repoInfo]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    const guard = guardRef.current;
+    return () => {
+      guard.abort();
+    };
+  }, []);
 
   const handleAsk = async (questionText: string) => {
     if (!repoInfo) return;
+
+    const { requestId, signal } = guardRef.current.startRequest(repoInfo);
 
     setLoading(true);
     setError(null);
@@ -37,13 +48,27 @@ export const App: React.FC = () => {
     setLastQuestion(questionText);
 
     try {
-      const result = await askQuestion({
-        owner: repoInfo.owner,
-        repo: repoInfo.repo,
-        question: questionText,
-      });
+      const result = await askQuestion(
+        {
+          owner: repoInfo.owner,
+          repo: repoInfo.repo,
+          question: questionText,
+        },
+        signal
+      );
+
+      // Verify this response still belongs to the active request and repository
+      if (!guardRef.current.isCurrent(requestId, repoInfo)) {
+        return;
+      }
+
       setResponse(result);
     } catch (err: unknown) {
+      // If stale or aborted due to repo change, do not change error or loading state
+      if (!guardRef.current.isCurrent(requestId, repoInfo)) {
+        return;
+      }
+
       if (err instanceof BackendError) {
         setError(err);
       } else {
@@ -55,7 +80,10 @@ export const App: React.FC = () => {
         );
       }
     } finally {
-      setLoading(false);
+      if (guardRef.current.isCurrent(requestId, repoInfo)) {
+        setLoading(false);
+        guardRef.current.finishRequest(requestId);
+      }
     }
   };
 
