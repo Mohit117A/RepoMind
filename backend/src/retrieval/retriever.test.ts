@@ -201,5 +201,31 @@ describe('Retrieval and Chunking Pipeline', () => {
       const afterMeta = db.getRepository('owner', 'repo');
       expect(afterMeta?.lastFetchedAt).toBe(initialFetchedAt);
     });
+
+    it('rejected private repository leaves no records or freshness, and embedder is never called', async () => {
+      const privateDb = new RepositoryDatabase(':memory:');
+      const forbiddenError = Object.assign(new Error('Only public repositories are supported'), {
+        statusCode: 403,
+        code: 'forbidden',
+      });
+      mockClient.fetchRepositoryHistory = vi.fn().mockRejectedValue(forbiddenError);
+      const embedSpy = vi.spyOn(mockEmbedder, 'embedChunks');
+
+      const testRetriever = new HistoryRetriever(privateDb, mockClient, mockEmbedder);
+
+      await expect(
+        testRetriever.ingestRepository('secret-org', 'private-repo')
+      ).rejects.toThrow('Only public repositories are supported');
+
+      // Database leaves no trace of the repository
+      expect(privateDb.getRepository('secret-org', 'private-repo')).toBeNull();
+      expect(privateDb.isFresh('secret-org', 'private-repo', 60000)).toBe(false);
+      expect(privateDb.getRecordCount('secret-org', 'private-repo')).toBe(0);
+      expect(privateDb.getChunkCount('secret-org', 'private-repo')).toBe(0);
+      expect(privateDb.getEmbeddingCount('secret-org', 'private-repo')).toBe(0);
+
+      // Embedder is never called
+      expect(embedSpy).not.toHaveBeenCalled();
+    });
   });
 });

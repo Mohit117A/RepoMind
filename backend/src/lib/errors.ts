@@ -20,6 +20,12 @@ export class BadRequestError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Only public repositories are supported', code: string = 'forbidden') {
+    super(403, code, message);
+  }
+}
+
 export class NotImplementedError extends AppError {
   constructor(
     message: string = 'Repository history retrieval and AI answering are not implemented yet.'

@@ -525,3 +525,32 @@ npm run test
   - Merged PR demo question regarding `@thecodepace/fastify-http-query` executed in Chrome side panel, with PR #7259 showing as Merged.
   - "Backend offline" message verified in Chrome side panel after stopping the local backend server.
   - Acceptance table in `README.md` updated accordingly (noting manual checks and explicitly stating that no automated component tests exist for `StatusBanner.tsx`).
+
+---
+
+## Session 7: Hardening Batch 1 - Localhost Restriction and Private Repo Rejection
+
+- **Date:** 2026-11-26
+- **What Was Done:**
+  1. **Local-Only HOST Default:**
+     - Added `host: process.env.HOST || '127.0.0.1'` to backend configuration (`backend/src/config.ts`).
+     - Updated `backend/src/server.ts` to pass `config.host` to `app.listen(config.port, config.host, ...)`.
+     - Added `HOST=127.0.0.1` to `.env.example` and documented network exposure warning in both `.env.example` and `README.md`.
+  2. **Reject Private Repositories:**
+     - Enforced `isPrivate === false` check in `backend/src/github/client.ts`. If `isPrivate !== false` (including `true`, `undefined`, or missing), throws HTTP 403 `ForbiddenError` with message `"Only public repositories are supported"`.
+     - Rejection occurs before normalizing, chunking, embedding, caching in SQLite, or calling Gemini.
+     - Checked local cache (`backend/data/repomind.db`): only `fastify/fastify` (public) was present; no private data existed.
+  3. **Least-Privileged Token Guidance:**
+     - Updated `README.md` to explain that classic `public_repo` scope grants write permissions on public repositories.
+     - Recommended least-privileged fine-grained personal access tokens with public repositories read-only access (no write, no private access) or classic tokens with zero scopes checked.
+  4. **Mocked Tests:**
+     - Added unit tests in `backend/src/github/client.test.ts` for `isPrivate === true` (throws 403), `isPrivate` undefined/missing (throws 403), and `isPrivate === false` (succeeds).
+     - Added test in `backend/src/retrieval/retriever.test.ts` confirming rejected private repos write no records or freshness to the database and never invoke the embedder.
+     - Added integration test in `backend/src/app.test.ts` verifying `POST /api/ask` returns HTTP 403 with `{ error: { code: 'forbidden', message: 'Only public repositories are supported' } }`.
+     - Added test in `backend/src/app.test.ts` verifying `config.host` defaults to `127.0.0.1`.
+  5. **Live Verification:**
+     - Verified backend binds to `127.0.0.1:3001` (checked via `Get-NetTCPConnection`).
+     - Verified `http://localhost:3001/health` succeeds with HTTP 200.
+     - Verified connection to LAN IP on port 3001 timed out / connection refused.
+     - Verified cached query for `fastify/fastify` (`"Why was @thecodepace/fastify-http-query removed from the ecosystem docs?"`) returned supported answer citing merged PR #7259 and commit.
+

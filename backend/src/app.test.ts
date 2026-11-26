@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app';
+import { config } from './config';
 import { historyRetriever } from './retrieval/retriever';
 import { geminiAnswerGenerator, INSUFFICIENT_EVIDENCE_SENTENCE } from './llm/generator';
+import { ForbiddenError } from './lib/errors';
 
 describe('Backend API Endpoints', () => {
+  describe('Config and Security defaults', () => {
+    it('defaults HOST to 127.0.0.1', () => {
+      expect(config.host).toBe('127.0.0.1');
+    });
+  });
+
   describe('GET /health', () => {
     it('returns status ok with timestamp and HTTP 200', async () => {
       const response = await request(app).get('/health');
@@ -249,6 +257,28 @@ describe('Backend API Endpoints', () => {
 
       // Ingest was called only ONCE for both concurrent requests!
       expect(ingestSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns HTTP 403 with readable message when repository is private', async () => {
+      vi.spyOn(historyRetriever, 'ingestRepository').mockRejectedValue(
+        new ForbiddenError('Only public repositories are supported')
+      );
+
+      const response = await request(app)
+        .post('/api/ask')
+        .send({
+          owner: 'secret-org',
+          repo: 'private-repo',
+          question: 'Why was the secret key rotated?',
+        });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual({
+        error: {
+          code: 'forbidden',
+          message: 'Only public repositories are supported',
+        },
+      });
     });
   });
 

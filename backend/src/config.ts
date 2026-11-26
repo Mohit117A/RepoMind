@@ -7,6 +7,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 export interface Config {
+  host: string;
   port: number;
   githubToken: string | undefined;
   geminiApiKey: string | undefined;
@@ -33,6 +34,7 @@ function resolveDatabasePath(rawPath?: string): string {
 }
 
 export const config: Config = {
+  host: process.env.HOST || '127.0.0.1',
   port: parseInt(process.env.PORT || '3001', 10),
   githubToken: process.env.GITHUB_TOKEN || undefined,
   geminiApiKey: process.env.GEMINI_API_KEY || undefined,

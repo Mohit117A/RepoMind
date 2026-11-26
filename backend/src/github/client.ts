@@ -1,5 +1,5 @@
 import { config } from '../config';
-import { AppError } from '../lib/errors';
+import { AppError, ForbiddenError } from '../lib/errors';
 import { FetchHistoryResult } from '../types';
 import { REPOSITORY_HISTORY_QUERY, getRepositoryHistoryVariables } from './queries';
 import { normalizeRepositoryHistory, RawRepositoryData } from './normalize';
@@ -166,6 +166,10 @@ export class GitHubGraphQLClient {
         'repo_not_found',
         `Repository "${owner}/${repo}" was not found or is inaccessible.`
       );
+    }
+
+    if (json.data.repository.isPrivate !== false) {
+      throw new ForbiddenError('Only public repositories are supported');
     }
 
     return normalizeRepositoryHistory(owner, repo, json.data.repository);

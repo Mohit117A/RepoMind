@@ -3,8 +3,8 @@ import { config, validateConfig } from './config';
 
 validateConfig();
 
-const server = app.listen(config.port, () => {
-  console.log(`[RepoMind Backend] Server running at http://localhost:${config.port}`);
+const server = app.listen(config.port, config.host, () => {
+  console.log(`[RepoMind Backend] Server running at http://${config.host}:${config.port}`);
 });
 
 process.on('SIGTERM', () => {

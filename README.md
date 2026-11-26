@@ -113,9 +113,13 @@ cp .env.example .env
 ```
 
 The `.env` file contains:
+- `HOST`: Server interface to bind to (defaults to `127.0.0.1` for local-only security).
+  - *Security note:* Exposing `HOST` to `0.0.0.0` or a public network interface is unsafe without access control and authentication.
 - `PORT`: Backend port (defaults to `3001` if unset).
-- `GITHUB_TOKEN`: GitHub Personal Access Token (classic with `public_repo` read access or fine-grained token with Public Repositories read access). Required for Phase 2 history ingestion.
-  - *How to get:* Visit [GitHub Personal Access Tokens Settings](https://github.com/settings/tokens) -> Generate new token (classic) -> Select `public_repo` (read only).
+- `GITHUB_TOKEN`: GitHub Personal Access Token. Required for Phase 2 history ingestion.
+  - *Least-Privileged Token Guidance:* The classic `public_repo` scope grants write access to public repositories, not read-only access. To use the least-privileged token with no private repository access:
+    - **Recommended (Fine-Grained PAT):** Visit [GitHub Fine-Grained Personal Access Tokens](https://github.com/settings/tokens?type=beta) -> *Generate new token*. Under *Repository access*, select *Public Repositories (read-only)* (or *Only select repositories*). Under *Permissions*, leave all write/admin permissions unselected. Fine-grained tokens automatically include read-only access to public repositories without granting access to your private repositories or write capabilities.
+    - **Alternative (Classic PAT):** Visit [GitHub Personal Access Tokens (Classic)](https://github.com/settings/tokens) -> *Generate new token (classic)* -> Leave **all scope checkboxes unchecked (no scopes)**. A token with no scopes checked can authenticate public GraphQL and REST API queries with increased rate limits (5,000 req/hr) without granting write permissions or private repository access.
 - `GEMINI_API_KEY`: Google Gemini API key from Google AI Studio. Required for vector embeddings and Phase 4 answering.
   - *How to get:* Visit [Google AI Studio](https://aistudio.google.com/) -> Get API Key.
 - `GEMINI_MODEL`: Model used for evidence-grounded answer generation (defaults to `gemini-3.5-flash-lite`, configurable).

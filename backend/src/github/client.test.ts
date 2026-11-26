@@ -91,4 +91,76 @@ describe('GitHubGraphQLClient', () => {
       })
     );
   });
+
+  it('rejects repository when isPrivate is true with 403 Forbidden', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        data: {
+          repository: {
+            nameWithOwner: 'owner/secret-repo',
+            isPrivate: true,
+            pullRequests: { totalCount: 0, nodes: [] },
+          },
+        },
+      }),
+    });
+
+    const client = new GitHubGraphQLClient('valid-token');
+    await expect(client.fetchRepositoryHistory('owner', 'secret-repo')).rejects.toThrowError(
+      expect.objectContaining({
+        statusCode: 403,
+        message: 'Only public repositories are supported',
+      })
+    );
+  });
+
+  it('rejects repository when isPrivate is missing/undefined with 403 Forbidden', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        data: {
+          repository: {
+            nameWithOwner: 'owner/unknown-visibility-repo',
+            // isPrivate omitted
+            pullRequests: { totalCount: 0, nodes: [] },
+          },
+        },
+      }),
+    });
+
+    const client = new GitHubGraphQLClient('valid-token');
+    await expect(client.fetchRepositoryHistory('owner', 'unknown-visibility-repo')).rejects.toThrowError(
+      expect.objectContaining({
+        statusCode: 403,
+        message: 'Only public repositories are supported',
+      })
+    );
+  });
+
+  it('accepts repository when isPrivate is false', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        data: {
+          repository: {
+            nameWithOwner: 'owner/public-repo',
+            isPrivate: false,
+            pullRequests: { totalCount: 0, nodes: [] },
+          },
+        },
+      }),
+    });
+
+    const client = new GitHubGraphQLClient('valid-token');
+    const result = await client.fetchRepositoryHistory('owner', 'public-repo');
+    expect(result.records).toEqual([]);
+    expect(result.isTruncated).toBe(false);
+  });
 });
