@@ -901,4 +901,286 @@ describe('GeminiAnswerGenerator', () => {
     expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
     expect(result.sources).toEqual([]);
   });
+
+  describe('grouped citation markers and code span handling', () => {
+    const multiEvidence: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-1',
+        recordId: 'owner/repo/pr-1',
+        type: 'pull_request',
+        title: 'PR #1: Commit 1',
+        url: 'https://github.com/owner/repo/pull/1',
+        excerpt: 'State: MERGED\nDetails 1',
+        similarity: 0.9,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nDetails 1',
+      },
+      {
+        chunkId: 'chunk-2',
+        recordId: 'owner/repo/issue-2',
+        type: 'issue',
+        title: 'Issue #2: Report 2',
+        url: 'https://github.com/owner/repo/issues/2',
+        excerpt: 'Report 2 details',
+        similarity: 0.85,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'Report 2 details',
+      },
+      {
+        chunkId: 'chunk-3',
+        recordId: 'owner/repo/pr-3',
+        type: 'pull_request',
+        title: 'PR #3: Fix 3',
+        url: 'https://github.com/owner/repo/pull/3',
+        excerpt: 'State: MERGED\nFix 3 details',
+        similarity: 0.8,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFix 3 details',
+      },
+      {
+        chunkId: 'chunk-4',
+        recordId: 'owner/repo/pr-4',
+        type: 'pull_request',
+        title: 'PR #4: Fix 4',
+        url: 'https://github.com/owner/repo/pull/4',
+        excerpt: 'State: MERGED\nFix 4 details',
+        similarity: 0.75,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFix 4 details',
+      },
+      {
+        chunkId: 'chunk-5',
+        recordId: 'owner/repo/pr-5',
+        type: 'pull_request',
+        title: 'PR #5: Fix 5 (shares URL with PR 3)',
+        url: 'https://github.com/owner/repo/pull/3',
+        excerpt: 'State: MERGED\nFix 3 duplicate details',
+        similarity: 0.7,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFix 3 duplicate details',
+      },
+    ];
+
+    it('correctly renumbers grouped markers like [3, 4, 1] into separate markers [1][2][3]', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'Changes were proposed in [3, 4, 1].',
+                      evidenceStatus: 'supported',
+                      citedIds: [3, 4, 1],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('supported');
+      expect(result.sources).toHaveLength(3);
+      // Sources order: 3 -> [1], 4 -> [2], 1 -> [3]
+      expect(result.answer).toContain('[1][2][3]');
+    });
+
+    it('handles compact grouped markers [3,4] and adjacent markers [3][4]', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'Grouped in [3,4] and adjacent in [3][4].',
+                      evidenceStatus: 'supported',
+                      citedIds: [3, 4],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('supported');
+      expect(result.sources).toHaveLength(2);
+      expect(result.answer).toContain('Grouped in [1][2] and adjacent in [1][2]');
+    });
+
+    it('deduplicates grouped markers that map to the same source URL', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      // 3 and 5 share the same URL
+                      answer: 'Reported in [3, 5].',
+                      evidenceStatus: 'supported',
+                      citedIds: [3, 5],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('supported');
+      expect(result.sources).toHaveLength(1);
+      // Both 3 and 5 map to source 1, so [3, 5] deduplicates to [1]
+      expect(result.answer).toContain('Reported in [1]');
+      expect(result.answer).not.toContain('[1][1]');
+    });
+
+    it('does not treat bracketed numbers inside backtick code spans (like `response[200]`) as citations', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'When accessing `schema.response[200].content` it threw an error [1].',
+                      evidenceStatus: 'supported',
+                      citedIds: [1],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('supported');
+      expect(result.sources).toHaveLength(1);
+      expect(result.answer).toContain('`schema.response[200].content`');
+      expect(result.answer).toContain('it threw an error [1]');
+    });
+
+    it('rejects range markers like [3-5] and returns insufficient', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'Refer to items [3-5] for details.',
+                      evidenceStatus: 'supported',
+                      citedIds: [3, 4, 5],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('insufficient');
+      expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+      expect(result.sources).toEqual([]);
+    });
+
+    it('rejects marker when number inside grouped marker cannot be mapped to a source', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'Addressed in [1, 99].',
+                      evidenceStatus: 'supported',
+                      citedIds: [1],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('insufficient');
+      expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+      expect(result.sources).toEqual([]);
+    });
+
+    it('final check: rejects response if a marker value is outside 1..sources.length', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      answer: 'Checked in [0].',
+                      evidenceStatus: 'supported',
+                      citedIds: [1],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generator = new GeminiAnswerGenerator('test-api-key', 'gemini-3.5-flash-lite', mockFetch as unknown as typeof fetch);
+      const result = await generator.generateAnswer('Why?', 'owner', 'repo', multiEvidence);
+
+      expect(result.evidenceStatus).toBe('insufficient');
+      expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+      expect(result.sources).toEqual([]);
+    });
+  });
 });

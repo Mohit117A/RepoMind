@@ -13,7 +13,7 @@ Answer only from the supplied repository evidence.
 Do not use outside knowledge to infer why a decision was made.
 Do not invent events, people, dates, links, issue numbers, or motivations.
 Distinguish explicit statements in the evidence from cautious interpretation. Use cautious wording when evidence is indirect.
-Attach references to claims using [n] markers matching the numbered evidence items (e.g. "...fixed the plugin registration [1].").
+Attach references to claims using single-number bracketed markers [n] matching the numbered evidence items (e.g. "...fixed the plugin registration [1]."). Write exactly one number per bracket (e.g. [1][2] instead of [1, 2] or [1-2]). Include every marked evidence number in citedIds.
 Speak directly. Never start your answer with "The user asks", "The user assumes", or similar meta-references to the user.
 OPEN or CLOSED unmerged PRs and their commits are proposals, not changes that happened. If the question assumes a change happened but the evidence only shows a proposal, state directly that the change is currently an unmerged proposal.
 Name only PR or issue numbers that you cite in citedIds. Do not mention any numbers that are not cited.
@@ -412,17 +412,69 @@ export class GeminiAnswerGenerator {
     // Rule 5: Attach references to claims: Gemini marks claims with [n] using evidence numbers.
     // The backend validates them, renumbers them to match the returned sources order,
     // and rejects markers with no source.
+    // Handle single, grouped ([3, 4, 7] and [3,4]) and adjacent ([3][4]) markers.
+    // Renumber every number to match the returned sources and output them as separate markers like [1][2][3].
+    // Remove duplicates that map to the same source.
+    // If any number cannot be mapped to a source, or a numeric marker uses another format such as [3-5], return insufficient.
+    // Do not treat bracketed numbers inside backtick code (such as `response[200]`) as citations.
+
+    // 1. Mask backtick code spans to avoid processing bracketed numbers inside code
+    const codeSpans: string[] = [];
+    const textWithoutCode = directAnswer.replace(/(`+)([\s\S]*?)\1/g, (match) => {
+      codeSpans.push(match);
+      return `\x00CODE_${codeSpans.length - 1}\x00`;
+    });
+
     let markerValidationFailed = false;
-    let renumberedAnswer = directAnswer.replace(/\[(\d+)\]/g, (match, digits) => {
-      const origNum = parseInt(digits, 10);
-      const newIndex = evidenceToSourceIndex.get(origNum);
-      if (newIndex !== undefined) {
-        return `[${newIndex}]`;
+
+    // 2. Reject non-standard numeric markers like ranges [3-5]
+    if (/\[\s*\d+\s*-\s*\d+\s*\]/.test(textWithoutCode)) {
+      console.log('[Generator] Rejected range marker format (e.g. [3-5]). Returning insufficient.');
+      return {
+        answer: INSUFFICIENT_EVIDENCE_SENTENCE,
+        evidenceStatus: 'insufficient',
+        sources: [],
+      };
+    }
+
+    // 3. Process bracketed numeric groups like [3, 4, 7], [3,4], or [3]
+    const renumberedWithoutCode = textWithoutCode.replace(/\[([\s\d,]+)\]/g, (fullMatch, inner) => {
+      // Split by comma
+      const parts = inner.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+      
+      // If the bracket contained no digits or invalid format, reject
+      if (parts.length === 0) {
+        console.log(`[Generator] Empty or invalid bracketed marker ${fullMatch}. Returning insufficient.`);
+        markerValidationFailed = true;
+        return fullMatch;
       }
-      // Invalid marker with no corresponding valid source
-      console.log(`[Generator] Invalid marker [${origNum}] has no matching valid source. Rejecting answer.`);
-      markerValidationFailed = true;
-      return match;
+
+      const mappedSourceIndices: number[] = [];
+      const seenSourceIndicesInGroup = new Set<number>();
+
+      for (const part of parts) {
+        if (!/^\d+$/.test(part)) {
+          console.log(`[Generator] Non-digit in marker ${fullMatch}: ${part}. Returning insufficient.`);
+          markerValidationFailed = true;
+          return fullMatch;
+        }
+
+        const origNum = parseInt(part, 10);
+        const newIndex = evidenceToSourceIndex.get(origNum);
+        if (newIndex === undefined) {
+          console.log(`[Generator] Marker [${origNum}] has no matching valid source. Returning insufficient.`);
+          markerValidationFailed = true;
+          return fullMatch;
+        }
+
+        if (!seenSourceIndicesInGroup.has(newIndex)) {
+          seenSourceIndicesInGroup.add(newIndex);
+          mappedSourceIndices.push(newIndex);
+        }
+      }
+
+      // Output as separate markers e.g. [1][2][3]
+      return mappedSourceIndices.map((idx) => `[${idx}]`).join('');
     });
 
     if (markerValidationFailed) {
@@ -431,6 +483,30 @@ export class GeminiAnswerGenerator {
         evidenceStatus: 'insufficient',
         sources: [],
       };
+    }
+
+    // 4. Clean up any adjacent duplicate markers that may have formed, e.g. [1][1] -> [1]
+    const deduplicatedAdjacent = renumberedWithoutCode.replace(/(\[\d+\])(?:\1)+/g, '$1');
+
+    // 5. Restore code spans
+    let renumberedAnswer = deduplicatedAdjacent.replace(/\x00CODE_(\d+)\x00/g, (_m, idxStr) => {
+      const idx = parseInt(idxStr, 10);
+      return codeSpans[idx] || '';
+    });
+
+    // 6. Final check: every marker outside code must be between 1 and the number of sources
+    const textForCheck = renumberedAnswer.replace(/(`+)([\s\S]*?)\1/g, '');
+    const finalMarkerMatches = textForCheck.matchAll(/\[(\d+)\]/g);
+    for (const m of finalMarkerMatches) {
+      const markerVal = parseInt(m[1], 10);
+      if (markerVal < 1 || markerVal > validSources.length) {
+        console.log(`[Generator] Final check failed: marker [${markerVal}] is outside 1..${validSources.length}. Returning insufficient.`);
+        return {
+          answer: INSUFFICIENT_EVIDENCE_SENTENCE,
+          evidenceStatus: 'insufficient',
+          sources: [],
+        };
+      }
     }
 
     // Rule 6: Add the merge sentence only when the cited items involve at least one PR and none is MERGED.

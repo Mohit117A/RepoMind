@@ -584,3 +584,28 @@ npm run test
        - Ran questions a and b 3 times each: all 3 runs returned `supported` with 0 errors or unexpected drops.
 
 
+---
+
+## Session 8 Correction: Grouped Citation Markers and Code Span Masking
+
+- **Date:** 2026-11-26
+- **What Was Done:**
+  1. **Grouped and Adjacent Marker Renumbering (`backend/src/llm/generator.ts`):**
+     - Replaced single-number regex with grouped marker processing `/\[([\s\d,]+)\]/g`.
+     - Renumbers comma-separated groups (e.g. `[3, 4, 7]` and `[3,4]`) and adjacent markers (e.g. `[3][4]`) into separate individual markers (e.g. `[1][2][3]`).
+     - Deduplicates markers that map to the same source URL (e.g. `[3, 5]` mapping to source 1 becomes `[1]`).
+     - Rejects any malformed or range markers (such as `[3-5]`), falling back to `insufficient`.
+  2. **Code Span Exclusion:**
+     - Masked backtick code spans before marker replacement so bracketed numbers inside code (e.g. `response[200]`) are never mistaken for citation markers or renumbered.
+  3. **Gemini System Instruction:**
+     - Instructed Gemini to write single-number bracketed markers (e.g. `[1][2]` instead of `[1, 2]`) and to include every marked evidence number in `citedIds`.
+  4. **Post-Processing Invariant:**
+     - Added final verification: verifies every marker outside code falls within `1..sources.length`; otherwise rejects the response as `insufficient`.
+  5. **Mocked Unit Tests:**
+     - Added 7 tests covering grouped markers (`[3, 4, 1]`), compact groups (`[3,4]`), deduplication of same-URL citations, code span protection (`response[200]`), range rejection (`[3-5]`), unmapped marker rejection, and 1..sources.length boundary validation.
+  6. **Live Backend Verification:**
+     - 68 backend tests + 15 extension tests passed (83 total).
+     - Executed questions a and b 3 times each against live backend:
+       - Every run returned `supported` with 0 errors.
+       - Every marker outside backtick code was separated (`[1][2][4]`) and matched its exact source count.
+       - "Why did Fastify switch its rendering engine from React to Vue?" remained `insufficient`.
