@@ -254,21 +254,19 @@ cd extension && npm run test
 
 ## Acceptance Criteria (from implementation.md)
 
-All 13 acceptance criteria defined in `implementation.md` have been implemented and verified:
-
 | Acceptance Criterion | Status | How and By Whom Tested |
 |---|---|---|
-| A Chrome MV3 extension loads unpacked without manifest errors. | Tested | Loaded unpacked in Google Chrome without errors by user and developer; verified via automated build checks (`npm run build:extension`). |
-| It recognises a supported GitHub repository URL. | Tested | Tested across 13 test cases in `parseGithubUrl.test.ts` (Vitest) by developer; verified live on GitHub tabs in Chrome by user. |
-| Its side panel opens and displays the repository identity. | Tested | Verified in Google Chrome by user using the Chrome Side Panel API (`chrome.sidePanel.setPanelBehavior`) and `RepoChip` component. |
-| A user can submit a natural-language question. | Tested | Verified via `QuestionForm.tsx` unit and integration tests (Vitest) by developer; tested interactively in Chrome side panel by user. |
-| The backend fetches real GitHub history using GraphQL. | Tested | Tested via `GitHubGraphQLClient` unit tests (Vitest) and live ingestion of `fastify/fastify` repository history by developer. |
-| The backend caches fetched records in SQLite. | Tested | Tested via 7 integration tests in `database.test.ts` (Vitest) by developer; verified idempotency and cache persistence in `backend/data/repomind.db`. |
-| Relevant evidence is retrieved for a question. | Tested | Tested via cosine similarity math and retriever ranking tests in `retriever.test.ts` (Vitest) and live CLI verification `npm run retrieve` by developer. |
-| Gemini answers using only the retrieved evidence. | Tested | Tested via 12 unit tests in `generator.test.ts` (Vitest) by developer; verified live through `/api/ask` on `fastify/fastify` by developer and user. |
-| The answer includes working links to real GitHub sources. | Tested | Tested via `AnswerCard.test.ts` (Vitest) by developer; verified live in Chrome side panel and direct API tests by user and developer. |
-| The system explicitly reports insufficient evidence instead of guessing. | Tested | Tested via unit tests in `generator.test.ts` (Vitest) by developer; verified live on counterfactual question ("React to Vue") by developer and user. |
-| Errors and loading states are visible and understandable. | Tested | Tested via `StatusBanner.tsx` component tests and live timeout/offline tests by developer; verified in Chrome by user. |
-| The project has setup instructions and an `.env.example`. | Tested | Verified `.env.example` template, setup documentation, and secret leak prevention checks by developer. |
-| A complete end-to-end demo has been tested on a public repository. | Tested | Tested live end-to-end against `fastify/fastify` via Chrome side panel by user and `/api/ask` API calls by developer. |
+| A Chrome MV3 extension loads unpacked without manifest errors. | Tested | Loaded unpacked in Google Chrome without manifest errors by user and developer; extension build verified by developer via `npm run build:extension`. |
+| It recognises a supported GitHub repository URL. | Tested | Tested across 13 test cases in `parseGithubUrl.test.ts` (Vitest) by developer; verified live on GitHub repository tabs in Chrome by user. |
+| Its side panel opens and displays the repository identity. | Tested | Tested manually in Google Chrome on repository pages by user (toolbar action opens side panel, RepoChip displays owner/repo). |
+| A user can submit a natural-language question. | Tested | Tested manually in Chrome side panel by user (entered question text, submitted). No automated component test exists for `QuestionForm.tsx`. |
+| The backend fetches real GitHub history using GraphQL. | Tested | Tested via 5 unit tests in `client.test.ts` (Vitest) by developer; live history ingestion on `fastify/fastify` verified by developer. |
+| The backend caches fetched records in SQLite. | Tested | Tested via 7 integration tests in `database.test.ts` (Vitest) by developer; verified cache persistence in `backend/data/repomind.db`. |
+| Relevant evidence is retrieved for a question. | Tested | Tested via 8 integration tests in `retriever.test.ts` (Vitest) by developer; verified live via `npm run retrieve` CLI on `fastify/fastify`. |
+| Gemini answers using only the retrieved evidence. | Tested | Tested via 12 unit tests in `generator.test.ts` (Vitest) by developer; live API responses on `fastify/fastify` verified by developer; supported answer verified in Chrome by user. |
+| The answer includes working links to real GitHub sources. | Tested | Tested manually in Chrome by user (verified working source link to PR #7267). Automated test `AnswerCard.test.ts` validates response data structure only; it does not render components or test DOM links. |
+| The system explicitly reports insufficient evidence instead of guessing. | Tested | Tested via unit tests in `generator.test.ts` (Vitest) by developer; live API query on counterfactual question verified by developer; tested manually in Chrome by user. |
+| Errors and loading states are visible and understandable. | Not tested | Not tested. No automated component tests exist for `StatusBanner.tsx`. While loading indicator was seen, error states such as backend offline message were not verified in Chrome. |
+| The project has setup instructions and an `.env.example`. | Tested | Verified `.env.example` file and setup instructions in `README.md` by developer; verified zero secrets committed to Git. |
+| A complete end-to-end demo has been tested on a public repository. | Tested | Tested on `fastify/fastify`: supported answer, source link to PR #7267, and insufficient-evidence response tested manually in Chrome by user; live API verified by developer. Merged demo question tested via API only, not yet in Chrome by user. |
 

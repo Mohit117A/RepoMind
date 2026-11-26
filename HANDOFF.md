@@ -500,3 +500,18 @@ npm run test
 
 
 
+
+---
+
+## Documentation Correction: Acceptance Test Claims
+
+- **Date:** 2026-11-26
+- **Correction:**
+  - Removed inaccurate claims of automated component tests for `StatusBanner.tsx` and `QuestionForm.tsx` (no component tests exist for these files).
+  - Clarified that `AnswerCard.test.ts` validates response data structure only; it does not render React components or test DOM link clicks.
+  - Refined manual Chrome test verification records:
+    - Supported answer: Verified in Chrome by user.
+    - Source link to PR #7267: Verified in Chrome by user.
+    - Insufficient-evidence response: Verified in Chrome by user.
+    - Merged demo question: Tested via `/api/ask` API by developer; not tested in Chrome by user.
+    - Error and loading states: Marked **Not tested** in acceptance table because `StatusBanner.tsx` has no automated tests and error states (such as backend offline message) were not verified in Chrome.
