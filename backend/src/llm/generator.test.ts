@@ -369,15 +369,18 @@ describe('GeminiAnswerGenerator', () => {
         excerpt: 'Schema crash details',
         similarity: 0.9,
         timestamp: '2026-11-20T10:00:00Z',
-        linkedPrs: [
-          {
-            id: 'owner/repo/pr-7256',
-            githubId: '7256',
-            title: 'PR #7256: Fix schema crash proposal',
-            state: 'OPEN',
-            url: 'https://github.com/owner/repo/pull/7256',
-          },
-        ],
+        linkedPrs: [],
+      },
+      {
+        chunkId: 'chunk-pr-7256',
+        recordId: 'owner/repo/pr-7256',
+        type: 'pull_request',
+        title: 'PR #7256: Fix schema crash proposal',
+        url: 'https://github.com/owner/repo/pull/7256',
+        excerpt: 'State: MERGED\nFix schema crash',
+        similarity: 0.8,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFix schema crash',
       },
     ];
 
@@ -463,5 +466,439 @@ describe('GeminiAnswerGenerator', () => {
 
     expect(result.answer).not.toMatch(/^the user assumes/i);
     expect(result.answer).toContain('The evidence shows open proposals rather than a merged change');
+  });
+
+  it('rule 1: returns insufficient when citedIds has no valid IDs even if numbers are named in answer', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'This was changed in PR #7267.',
+                    evidenceStatus: 'supported',
+                    citedIds: [], // empty citedIds
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      sampleEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('insufficient');
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+    expect(result.sources).toEqual([]);
+  });
+
+  it('rule 4: returns insufficient when unknown number is named in answer', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'Auth tokens were introduced in #9999 to replace session cookies.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      sampleEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('insufficient');
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+    expect(result.sources).toEqual([]);
+  });
+
+  it('rule 4: allows number when it is written in a cited item text', async () => {
+    const evidenceWithTextMention: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-1',
+        recordId: 'owner/repo/pr-1',
+        type: 'pull_request',
+        title: 'PR #1: Fix bug',
+        url: 'https://github.com/owner/repo/pull/1',
+        excerpt: 'State: MERGED\nFixes issue reported in RFC 10008 and discussion #42.',
+        similarity: 0.95,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFixes issue reported in RFC 10008 and discussion #42.',
+        linkedPrs: [],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'This was implemented per discussion #42.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      evidenceWithTextMention
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    expect(result.answer).toContain('This was implemented per discussion #42');
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0].url).toBe('https://github.com/owner/repo/pull/1');
+  });
+
+  it('rule 3: matches exact numbers (#72 beside #7246 is not treated as matched by #7246)', async () => {
+    const evidenceWith7246: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-1',
+        recordId: 'owner/repo/pr-7246',
+        type: 'pull_request',
+        title: 'PR #7246: Fix error handling',
+        url: 'https://github.com/owner/repo/pull/7246',
+        excerpt: 'State: MERGED\nFixed error handling',
+        similarity: 0.95,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFixed error handling',
+        linkedPrs: [],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    // #72 is mentioned, but only #7246 is in evidence!
+                    answer: 'This was changed in PR #72.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      evidenceWith7246
+    );
+
+    // #72 is not in evidence or cited item text -> must be rejected as insufficient
+    expect(result.evidenceStatus).toBe('insufficient');
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+    expect(result.sources).toEqual([]);
+  });
+
+  it('rule 6: does not add merge sentence when cited evidence has no PRs at all (issue only)', async () => {
+    const issueEvidence: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-issue-1',
+        recordId: 'owner/repo/issue-100',
+        type: 'issue',
+        title: 'Issue #100: Bug report',
+        url: 'https://github.com/owner/repo/issues/100',
+        excerpt: 'Discussion about bug',
+        similarity: 0.9,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'Discussion about bug',
+        linkedPrs: [],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'Issue #100 reports that the service crashed.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why does it crash?',
+      'owner',
+      'repo',
+      issueEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    // Issue only: no PR involved, so no merge sentence should be added
+    expect(result.answer).not.toContain('The cited evidence does not show that this change was merged.');
+  });
+
+  it('rule 6: adds merge sentence when an open PR is cited', async () => {
+    const openPrEvidence: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-pr-1',
+        recordId: 'owner/repo/pr-200',
+        type: 'pull_request',
+        title: 'PR #200: Proposed fix',
+        url: 'https://github.com/owner/repo/pull/200',
+        excerpt: 'State: OPEN\nProposed refactor',
+        similarity: 0.9,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: OPEN\nProposed refactor',
+        linkedPrs: [],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    answer: 'A refactor was proposed in PR #200.',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was it changed?',
+      'owner',
+      'repo',
+      openPrEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    expect(result.answer).toContain('The cited evidence does not show that this change was merged.');
+  });
+
+  it('rule 5: renumbers claim markers [n] to match returned sources order, including duplicate URLs', async () => {
+    const multiEvidence: EvidenceItem[] = [
+      {
+        chunkId: 'chunk-1',
+        recordId: 'owner/repo/pr-1',
+        type: 'pull_request',
+        title: 'PR #1: Feature A',
+        url: 'https://github.com/owner/repo/pull/1',
+        excerpt: 'State: MERGED\nFeature A details',
+        similarity: 0.9,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFeature A details',
+      },
+      {
+        chunkId: 'chunk-2',
+        recordId: 'owner/repo/pr-1-part2',
+        type: 'pull_request',
+        title: 'PR #1: Feature A more details',
+        url: 'https://github.com/owner/repo/pull/1', // Same URL as chunk-1!
+        excerpt: 'State: MERGED\nFeature A extra details',
+        similarity: 0.85,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'State: MERGED\nFeature A extra details',
+      },
+      {
+        chunkId: 'chunk-3',
+        recordId: 'owner/repo/issue-3',
+        type: 'issue',
+        title: 'Issue #3: Feature B',
+        url: 'https://github.com/owner/repo/issues/3',
+        excerpt: 'Feature B request',
+        similarity: 0.8,
+        timestamp: '2026-11-20T10:00:00Z',
+        fullText: 'Feature B request',
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    // Citing item 3 first, then item 2 (which shares URL with item 1)
+                    answer: 'Feature B was requested in [3]. Feature A was implemented in [2].',
+                    evidenceStatus: 'supported',
+                    citedIds: [3, 2],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      multiEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('supported');
+    expect(result.sources).toHaveLength(2);
+    // Source 1 is Issue #3 (citedId 3)
+    expect(result.sources[0].url).toBe('https://github.com/owner/repo/issues/3');
+    // Source 2 is PR #1 (citedId 2)
+    expect(result.sources[1].url).toBe('https://github.com/owner/repo/pull/1');
+    // Renumbered markers: [3] -> [1], [2] -> [2]
+    expect(result.answer).toContain('Feature B was requested in [1]');
+    expect(result.answer).toContain('Feature A was implemented in [2]');
+  });
+
+  it('rule 5: rejects invalid marker [n] with no source and returns insufficient', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    // [99] does not exist in evidence
+                    answer: 'Feature was added [99].',
+                    evidenceStatus: 'supported',
+                    citedIds: [1],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const generator = new GeminiAnswerGenerator(
+      'test-api-key',
+      'gemini-3.5-flash-lite',
+      mockFetch as unknown as typeof fetch
+    );
+
+    const result = await generator.generateAnswer(
+      'Why was this changed?',
+      'owner',
+      'repo',
+      sampleEvidence
+    );
+
+    expect(result.evidenceStatus).toBe('insufficient');
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_SENTENCE);
+    expect(result.sources).toEqual([]);
   });
 });

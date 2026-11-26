@@ -554,3 +554,33 @@ npm run test
      - Verified connection to LAN IP on port 3001 timed out / connection refused.
      - Verified cached query for `fastify/fastify` (`"Why was @thecodepace/fastify-http-query removed from the ecosystem docs?"`) returned supported answer citing merged PR #7259 and commit.
 
+---
+
+## Session 8: Hardening Batch 2 - Citation Correctness and Evidence Grounding
+
+- **Date:** 2026-11-26
+- **What Was Done:**
+  1. **Strict Citation Rules in Generator (`backend/src/llm/generator.ts`):**
+     - **Rule 1:** "supported" requires at least one valid `citedId` from Gemini. Numbers named in the text alone can never create support; otherwise returns the insufficient sentence with `sources: []`.
+     - **Rule 2:** Every source citation is backed by an evidence item whose content was supplied to Gemini. In `HistoryRetriever.retrieveEvidence`, linked PR records are now fetched as full evidence items first, within the 12-item cap.
+     - **Rule 3:** PR and issue numbers are matched exactly using the URL path (`/(?:issues|pull)/(\\d+)$`), never substrings (e.g. #72 is not matched by #7246).
+     - **Rule 4:** Any PR or issue number named in the answer must either match a supplied PR/issue in evidence (added to sources) or be present verbatim in the text of a cited evidence item. Unmatched numbers cause the response to fall back to `insufficient` with a clean diagnostic log.
+     - **Rule 5:** Claim references: instructed Gemini to attach `[n]` markers to claims corresponding to numbered evidence items. Backend validates all `[n]` markers, renumbers them to match the final returned sources order (handling duplicate URLs mapping to the same source), and rejects answers with unresolvable markers.
+     - **Rule 6:** Unmerged notice ("The cited evidence does not show that this change was merged.") is added ONLY when the cited evidence items involve at least one PR and none is `MERGED`. Answers citing only issues or merged PRs do not get the notice.
+     - **Rule 7:** Updated prompt instructions: use cautious wording when evidence is indirect, and return `insufficient` when the reason is not established or stated.
+  2. **Extension Source Numbering (`extension/src/sidepanel/components/Sources.tsx`):**
+     - Displayed `[n]` markers alongside each source badge so claim markers in the answer text directly match the numbered source cards.
+  3. **Mocked Unit & Integration Tests:**
+     - Added comprehensive tests in `backend/src/llm/generator.test.ts`: empty/invalid citedIds, unknown numbers in text, number allowed if in cited item text, #72 beside #7246 exact matching, issue-only citations (no merge sentence), open PR citations (merge sentence added), marker renumbering with duplicate URLs, and invalid marker rejection.
+     - Added test in `backend/src/retrieval/retriever.test.ts`: verifying with `topK: 1`, linked PRs for matching issues are automatically expanded into real evidence items.
+  4. **Live Verification:**
+     - Verified test suite: 61 backend tests + 15 extension tests passed (76 total).
+     - Verified builds: backend (`tsc`) and extension (`vite build`) compiled cleanly.
+     - Ran live queries against cached `fastify/fastify` repository:
+       - Question a: Supported answer citing PR #7259.
+       - Question b: Supported answer with direct proposal wording, correct claim markers `[n]`, citing PR #7267, Issue #7246, and PR #7247, appending unmerged notice.
+       - Question c: Insufficient evidence response.
+       - Question d (plausible question on PR #7249 whose description has no stated reason): Insufficient evidence response.
+       - Ran questions a and b 3 times each: all 3 runs returned `supported` with 0 errors or unexpected drops.
+
+

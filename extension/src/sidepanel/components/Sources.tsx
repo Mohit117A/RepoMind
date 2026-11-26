@@ -79,10 +79,11 @@ export const Sources: React.FC<SourcesProps> = ({ sources }) => {
           >
             <div className="flex items-center justify-between space-x-2">
               <span
-                className={`inline-flex items-center space-x-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${getBadgeStyle(
+                className={`inline-flex items-center space-x-1.5 rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${getBadgeStyle(
                   source.type
                 )}`}
               >
+                <span className="font-bold text-[10px] opacity-80">[{index + 1}]</span>
                 {getSourceIcon(source.type)}
                 <span>{formatSourceLabel(source.type)}</span>
               </span>

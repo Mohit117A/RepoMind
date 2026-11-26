@@ -156,18 +156,19 @@ export class HistoryRetriever {
     nonEmptyChunks.sort((a, b) => b.score - a.score);
 
     // Keep only the best chunk per record
-    const seenRecordIds = new Set<string>();
+    const seenScoredRecordIds = new Set<string>();
     const bestChunksByRecord: Array<{ chunk: TextChunk; score: number }> = [];
 
     for (const item of nonEmptyChunks) {
-      if (!seenRecordIds.has(item.chunk.recordId)) {
-        seenRecordIds.add(item.chunk.recordId);
+      if (!seenScoredRecordIds.has(item.chunk.recordId)) {
+        seenScoredRecordIds.add(item.chunk.recordId);
         bestChunksByRecord.push(item);
       }
     }
 
     // Take top K primary matches
     const primaryItems = bestChunksByRecord.slice(0, topK);
+    const seenRecordIds = new Set<string>(primaryItems.map((item) => item.chunk.recordId));
 
     // Build primary evidence items
     const evidence: EvidenceItem[] = primaryItems.map(({ chunk, score }) => {
@@ -192,7 +193,64 @@ export class HistoryRetriever {
       };
     });
 
-    // Expand with linked records from relationships if space remains (up to maxEvidenceCap)
+    // Expand evidence items within maxEvidenceCap:
+    // First, include linked PR records as real evidence items (rule 2)
+    if (evidence.length < maxEvidenceCap && primaryItems.length > 0) {
+      const primaryRecordIds = primaryItems.map((item) => item.chunk.recordId);
+      
+      // Collect linked PR record IDs for all primary records
+      const linkedPrRecordIds: string[] = [];
+      for (const pId of primaryRecordIds) {
+        const prs = this.db.getLinkedPrsForRecord(pId);
+        for (const pr of prs) {
+          if (!seenRecordIds.has(pr.id) && !linkedPrRecordIds.includes(pr.id)) {
+            linkedPrRecordIds.push(pr.id);
+          }
+        }
+      }
+
+      if (linkedPrRecordIds.length > 0) {
+        const prChunks = this.db.getChunksForRecords(linkedPrRecordIds);
+        const prChunksByRecord = new Map<string, TextChunk>();
+        for (const prChunk of prChunks) {
+          if (!prChunksByRecord.has(prChunk.recordId)) {
+            const bodyText = extractBodyText(prChunk.text);
+            if (bodyText.length > 0) {
+              prChunksByRecord.set(prChunk.recordId, prChunk);
+            }
+          }
+        }
+
+        for (const prId of linkedPrRecordIds) {
+          if (evidence.length >= maxEvidenceCap) break;
+          const prChunk = prChunksByRecord.get(prId);
+          if (!prChunk) continue;
+
+          seenRecordIds.add(prId);
+          const bodyText = extractBodyText(prChunk.text);
+          const excerpt = bodyText.length > 300
+            ? `${bodyText.slice(0, 300).trim()}...`
+            : bodyText;
+
+          const linkedPrs = this.db.getLinkedPrsForRecord(prChunk.recordId);
+
+          evidence.push({
+            chunkId: prChunk.id,
+            recordId: prChunk.recordId,
+            type: prChunk.sourceType,
+            title: prChunk.sourceTitle,
+            url: prChunk.sourceUrl,
+            excerpt,
+            similarity: 0.6,
+            timestamp: prChunk.timestamp,
+            fullText: prChunk.text,
+            linkedPrs,
+          });
+        }
+      }
+    }
+
+    // Expand with remaining linked records from relationships if space remains (up to maxEvidenceCap)
     if (evidence.length < maxEvidenceCap && primaryItems.length > 0) {
       const primaryRecordIds = primaryItems.map((item) => item.chunk.recordId);
       const relatedRecordIds = this.db.getRelatedRecordIds(primaryRecordIds);

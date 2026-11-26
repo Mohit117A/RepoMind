@@ -151,6 +151,22 @@ describe('Retrieval and Chunking Pipeline', () => {
       expect(result.evidence[0].title).toBeDefined();
     });
 
+    it('retrieves top-1 match and automatically includes linked PR record as evidence', async () => {
+      await retriever.ingestRepository('owner', 'repo');
+
+      // Question matches issue-2 ("Cookie parsing error") best
+      // With topK: 1, primary match is issue-2, and linked PR pr-1 is included in evidence
+      const result = await retriever.retrieveEvidence('owner', 'repo', 'Cookie parsing error on cross-origin', { topK: 1 });
+
+      expect(result.evidence.length).toBe(2);
+      const types = result.evidence.map((e) => e.type);
+      expect(types).toContain('issue');
+      expect(types).toContain('pull_request');
+      const urls = result.evidence.map((e) => e.url);
+      expect(urls).toContain('https://github.com/owner/repo/issues/2');
+      expect(urls).toContain('https://github.com/owner/repo/pull/1');
+    });
+
     it('honestly returns empty evidence when repository has no cached chunks', async () => {
       const result = await retriever.retrieveEvidence('nonexistent', 'repo', 'any question');
       expect(result.evidence).toEqual([]);
