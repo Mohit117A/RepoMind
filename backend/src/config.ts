@@ -33,6 +33,17 @@ function resolveDatabasePath(rawPath?: string): string {
   return path.resolve(rootDir, rawPath);
 }
 
+export function resolveCacheTtlMs(raw?: string): number {
+  if (raw === undefined || raw.trim() === '') {
+    return 24 * 60 * 60 * 1000;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('CACHE_TTL_HOURS must be a positive number');
+  }
+  return parsed * 60 * 60 * 1000;
+}
+
 export const config: Config = {
   host: process.env.HOST || '127.0.0.1',
   port: parseInt(process.env.PORT || '3001', 10),
@@ -60,7 +71,7 @@ export const RETRIEVAL_CONFIG = {
   CHUNK_MAX_CHARS: 800,
   CHUNK_OVERLAP_CHARS: 100,
   EMBEDDING_MODEL: 'gemini-embedding-001',
-  CACHE_TTL_MS: 24 * 60 * 60 * 1000, // 24 hours
+  CACHE_TTL_MS: resolveCacheTtlMs(process.env.CACHE_TTL_HOURS),
 } as const;
 
 /**
